@@ -1,0 +1,26 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class Training extends Model
+{
+    protected $fillable = [
+        'user_id',
+        'is_completed',
+        'provider',
+        'start_date',
+        'end_date',
+        'title'
+    ];
+
+    protected $casts = [
+        'completed_at' => 'date'
+    ];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+}
