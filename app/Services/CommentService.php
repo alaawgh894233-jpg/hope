@@ -30,7 +30,7 @@ class CommentService
         $comment = Comment::findOrFail($commentId);
 
         if ($comment->user_id !== $userId) {
-            abort(403, 'Unauthorized');
+            abort(403,   'Unauthorized');
         }
 
         $comment->update([
@@ -63,6 +63,11 @@ class CommentService
 
         return true;
     }
+    public function getCommentsCount($postId)
+    {
+        return Comment::where('job_post_id', $postId)->count();
+    }
+
 
     public function getByPost($postId)
     {

@@ -11,14 +11,32 @@ class SkillSuggestionAIController extends Controller
         protected SkillSuggestionService $service
     ) {}
 
+    // ══════════════════════════════════════════════════
+    //  POST /api/skills/suggest
+    // ══════════════════════════════════════════════════
     public function suggest(Request $request)
     {
-        return response()->json(
-            $this->service->suggest(
+        $validated = $request->validate([
+            'job_title'       => 'nullable|string|max:255',
+            'job_description' => 'nullable|string|max:5000',
+        ]);
+
+        try {
+            $result = $this->service->suggest(
                 $request->user(),
-                $request->job_title,
-                $request->job_description
-            )
-        );
+                $validated['job_title']       ?? null,
+                $validated['job_description'] ?? null
+            );
+
+            return response()->json([
+                'message' => 'Suggestions generated successfully',
+                'data'    => $result,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to generate suggestions',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
     }
 }

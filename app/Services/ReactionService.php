@@ -29,16 +29,31 @@ class ReactionService
 
     public function getPostReactions($postId)
     {
-        return Reaction::where('job_post_id', $postId)->get();
+        return Reaction::with('user:id,name')
+            ->where('job_post_id', $postId)
+            ->get();
     }
+
 
     public function countByType($postId)
     {
-        return Reaction::selectRaw('type, count(*) as total')
+        return Reaction::with('user:id,name')
             ->where('job_post_id', $postId)
+            ->get()
             ->groupBy('type')
-            ->get();
+            ->map(function ($items) {
+                return [
+                    'count' => $items->count(),
+                    'users' => $items->map(function ($reaction) {
+                        return [
+                            'id' => $reaction->user->id,
+                            'name' => $reaction->user->name,
+                        ];
+                    })->values()
+                ];
+            });
     }
+
     public function totalReactions($postId)
     {
         return Reaction::where('job_post_id', $postId)->count();

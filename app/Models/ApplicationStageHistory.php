@@ -1,4 +1,5 @@
 <?php
+// app/Models/ApplicationStageHistory.php
 
 namespace App\Models;
 
@@ -6,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class ApplicationStageHistory extends Model
 {
+    // ✅ اسم الـ table الفعلي
     protected $table = 'application_stage_history';
 
     protected $fillable = [
@@ -13,13 +15,8 @@ class ApplicationStageHistory extends Model
         'from_stage_id',
         'to_stage_id',
         'changed_by',
-        'note'
+        'note',
     ];
-
-    public function application()
-    {
-        return $this->belongsTo(JobApplication::class);
-    }
 
     public function fromStage()
     {
@@ -31,7 +28,8 @@ class ApplicationStageHistory extends Model
         return $this->belongsTo(WorkflowStage::class, 'to_stage_id');
     }
 
-    public function user()
+    // ✅ changed_by مش user
+    public function changer()
     {
         return $this->belongsTo(User::class, 'changed_by');
     }

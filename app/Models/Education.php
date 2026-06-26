@@ -18,8 +18,8 @@ class Education extends Model
     ];
 
     protected $casts = [
-        'start_date' => 'date',
-        'end_date' => 'date',
+        'start_date' => 'datetime', // ✅ كان date، غيّره لـ datetime
+        'end_date' => 'datetime',   // ✅ كان date، غيّره لـ datetime
     ];
 
     public function user()

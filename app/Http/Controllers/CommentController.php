@@ -43,4 +43,13 @@ class CommentController extends Controller
 
         return response()->json(['message' => 'deleted']);
     }
+
+    public function commentsCount($postId)
+    {
+        $count = $this->service->getCommentsCount($postId);
+
+        return response()->json([
+            'total_comments' => $count
+        ]);
+    }
 }

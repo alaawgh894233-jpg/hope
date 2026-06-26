@@ -38,16 +38,42 @@ class ReactionController extends Controller
 
     public function list($postId)
     {
-        return response()->json(
-            $this->service->getPostReactions($postId)
-        );
+        $reactions = $this->service->getPostReactions($postId);
+
+        $counts = [
+            'like'       => $reactions->where('type', 'like')->count(),
+            'love'       => $reactions->where('type', 'love')->count(),
+            'support'    => $reactions->where('type', 'support')->count(),
+            'insightful' => $reactions->where('type', 'insightful')->count(),
+        ];
+
+        // حذف الأنواع التي عددها 0
+        $counts = array_filter($counts, fn ($count) => $count > 0);
+
+        return response()->json([
+            'total' => $reactions->count(),
+
+            'counts' => $counts,
+
+            'users' => $reactions->map(function ($reaction) {
+                return [
+                    'id'   => $reaction->user->id,
+                    'name' => $reaction->user->name,
+                    'type' => $reaction->type,
+                ];
+            })->values()
+        ]);
     }
+
 
     public function stats($postId)
     {
-        return response()->json(
-            $this->service->countByType($postId)
-        );
+        $data = $this->service->countByType($postId);
+
+        return response()->json([
+            'total' => $this->service->totalReactions($postId),
+            'reactions' => $data
+        ]);
     }
     public function total($postId)
     {

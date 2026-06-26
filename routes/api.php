@@ -90,31 +90,38 @@ Route::middleware('auth:sanctum')->group(function () {
         // Interests
         Route::get('/interests', [InterestController::class, 'index']);
         Route::post('/interests', [InterestController::class, 'store']);
-        Route::put('/interests/{interest}', [InterestController::class, 'update']);
+        Route::post('/interests/{interest}', [InterestController::class, 'update']);
         Route::delete('/interests/{interest}', [InterestController::class, 'destroy']);
 
         // Trainings
         Route::get('/trainings', [TrainingController::class, 'index']);
         Route::post('/trainings', [TrainingController::class, 'store']);
-        Route::put('/trainings/{training}', [TrainingController::class, 'update']);
+        Route::post('/trainings/{training}', [TrainingController::class, 'update']);
         Route::delete('/trainings/{training}', [TrainingController::class, 'destroy']);
 
+    });Route::middleware('auth:sanctum')->group(function () {
+    Route::prefix('cv')->group(function () {
+
+        // البروفايل
+        Route::get('/generate',    [CvAnalysisController::class, 'build']);
+
+        // ملفات مرفوعة
+        Route::get('/files',                      [CvAnalysisController::class, 'listFiles']);
+        Route::get('/files/{id}',                 [CvAnalysisController::class, 'showFile']);
+        Route::get('/files/{id}/download',        [CvAnalysisController::class, 'downloadOriginalFile']);
+        // رفع واستخراج
+        Route::post('/upload',         [CvAnalysisController::class, 'uploadAndExtract']);
+        Route::post('/upload/confirm', [CvAnalysisController::class, 'confirmUploadedCv']);
+        // التحليل
+        Route::post('/analyze',    [CvAnalysisController::class, 'analyze']);
+        // التحسين المباشر ← جديد
+        Route::post('/enhance',                [CvAnalysisController::class, 'enhance']);
+        Route::post('/enhance/save',           [CvAnalysisController::class, 'saveEnhanced']);
+
+        Route::post('/pdf',        [CvAnalysisController::class, 'downloadPdf']);
+        Route::post('/match',      [CvAnalysisController::class, 'match']);
     });
-
-
-
-    Route::middleware('auth:sanctum')->group(function () {
-
-        Route::prefix('cv')->group(function () {
-            Route::post('/analyze', [CvAnalysisController::class, 'analyze']);
-            Route::get('/generate', [CvAnalysisController::class, 'build']);
-            Route::get('/pdf', [CvAnalysisController::class, 'downloadPdf']);
-            Route::post('/match', [CvAnalysisController::class, 'match']);
-            Route::post('/tune', [CvAnalysisController::class, 'tune']);
-        });
-
-    });
-
+});
 
     Route::middleware(['auth:sanctum'])->group(function () {
 
@@ -237,7 +244,7 @@ Route::post('/jobs/{jobId}/apply', [JobApplicationController::class, 'apply']); 
         Route::post('/comments/{id}', [CommentController::class, 'update']);
         Route::delete('/comments/{id}', [CommentController::class, 'destroy']);
         Route::post('/posts/{postId}/comments/reply', [CommentController::class, 'store']);
-
+        Route::get('/posts/{idPost}/comments/count', [CommentController::class, 'commentsCount']);
         Route::post('/comments/{id}/react', [CommentReactionController::class, 'react']);
         Route::delete('/comments/{id}/react', [CommentReactionController::class, 'remove']);
         Route::get('/comments/{id}/reactions/count', [CommentReactionController::class, 'count']);
@@ -303,8 +310,13 @@ Route::post('/jobs/{jobId}/apply', [JobApplicationController::class, 'apply']); 
     });
 
 
-    Route::get('/skills/suggestions', [SkillSuggestionAIController::class, 'suggest']);
-
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/skills/suggest', [SkillSuggestionAIController::class, 'suggest']);
+    Route::get('/skills/suggestions', [SkillSuggestionController::class, 'index']);
+    Route::post('/skills/suggestions/{suggestion}/accept', [SkillSuggestionController::class, 'accept']);
+    Route::post('/skills/suggestions/{suggestion}/reject', [SkillSuggestionController::class, 'reject']);
+    Route::delete('/skills/suggestions/{suggestion}', [SkillSuggestionController::class, 'destroy']);
+});
 Route::middleware('auth:sanctum')->group(function () {
 
     Route::post(
@@ -342,47 +354,38 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
 Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/applications/{id}/move-stage', [WorkflowController::class, 'move']);
-    Route::get('/applications/{id}/pipeline', [WorkflowController::class, 'pipeline']);
-    Route::post('/applications/{id}/evaluate-rules', [WorkflowController::class, 'evaluate']);
-    Route::get('/workflows/{id}/rules', [WorkflowController::class, 'index']);
-    Route::post('/rules', [WorkflowController::class, 'store']);
-    Route::put('/rules/{id}', [WorkflowController::class, 'update']);
-    Route::delete('/rules/{id}', [WorkflowController::class, 'destroy']);
+        Route::post('/applications/{id}/move-stage',     [WorkflowController::class, 'move']);
+        Route::get('/applications/{id}/pipeline',        [WorkflowController::class, 'pipeline']);
+        Route::get('/applications/{id}/available-stages',[WorkflowController::class, 'availableStages']);
+        Route::post('/applications/{id}/evaluate-rules', [WorkflowController::class, 'evaluate']);
+        Route::get('/workflows/{id}/rules',              [WorkflowController::class, 'index']);
+        Route::post('/rules',                            [WorkflowController::class, 'store']);
+        Route::post('/rules/{id}',                        [WorkflowController::class, 'update']);
+        Route::delete('/rules/{id}',                     [WorkflowController::class, 'destroy']);
 });
 
-Route::get('/gemini-models', function () {
-    $key = env('GEMINI_API_KEY');
-
-    return Http::get(
-        "https://generativelanguage.googleapis.com/v1beta/models?key={$key}"
-    )->json();
-});
-Route::get('/startup-projects', [StartupProjectController::class, 'index']);
-Route::get('/startup-projects/{id}', [StartupProjectController::class, 'show'])
-    ->middleware('auth:sanctum'); // ✅ لازم تكون logged in حتى نعرف صلاحيتك
-
-// 🔐 محمية
 Route::middleware('auth:sanctum')->group(function () {
 
-    // صاحب المشروع
+    // 1️⃣ إنشاء الفكرة — يرجع المشروع + الشركات المقترحة
     Route::post('/startup-projects', [StartupProjectController::class, 'store']);
-    Route::post('/startup-projects/{id}', [StartupProjectController::class, 'update']);
-    Route::delete('/startup-projects/{id}', [StartupProjectController::class, 'destroy']);
 
-    // اقتراح شركات — لصاحب المشروع
+    // 2️⃣ اقتراح شركات — لو المستخدم بدو يعيد
     Route::get('/startup-projects/{id}/suggest-companies', [StartupProjectController::class, 'suggestCompanies']);
 
-    // اهتمامات المشروع — لصاحب المشروع
-    Route::get('/startup-projects/{id}/interests', [StartupProjectController::class, 'interests']);
+    // 3️⃣ المستخدم يدعو الشركات المختارة
+    Route::post('/startup-projects/{id}/invite', [StartupProjectController::class, 'invite']);
 
-    // صاحب المشروع يرد على اهتمام
+    // 4️⃣ الشركة تبدي اهتمام
+    Route::post('/startup-projects/{id}/interest', [StartupProjectController::class, 'expressInterest']);
+
+    // 5️⃣ المستخدم يرد على الاهتمام
     Route::post('/startup-interests/{interestId}/respond', [StartupProjectController::class, 'respondToInterest']);
 
-    // الشركة تعبر عن اهتمام — company فقط
-    Route::middleware('company.approved')->group(function () {
-        Route::post('/startup-projects/{id}/interest', [StartupProjectController::class, 'expressInterest']);
-    });
+    // إدارة
+    Route::get('/startup-projects/{id}',         [StartupProjectController::class, 'show']);
+    Route::post('/startup-projects/{id}/update', [StartupProjectController::class, 'update']);
+    Route::delete('/startup-projects/{id}',      [StartupProjectController::class, 'destroy']);
+    Route::get('/startup-projects/{id}/interests',[StartupProjectController::class, 'interests']);
 });
 
 

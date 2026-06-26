@@ -17,13 +17,28 @@ return new class extends Migration
 
             $table->string('name');
 
-            $table->unsignedInteger('order_index'); // ✅ بس هاد — حذفنا order المكرر
+            $table->enum('type', [
+                'applied',
+                'screening',
+                'interview',
+                'training',
+                'final_accept',
+                'final_reject',
+            ]);
+
+            // ✅ ترتيب المرحلة داخل الـ workflow
+            $table->unsignedInteger('order_index')->default(0);
 
             $table->boolean('requires_approval')->default(false);
             $table->boolean('is_final')->default(false);
-            $table->string('final_status')->nullable(); // ✅ 'accepted' or 'rejected'
 
-            $table->timestamps(); // ✅ كانت مدموجة بسطر الـ final_status
+            // ✅ 'accepted' or 'rejected'
+            $table->string('final_status')->nullable();
+
+            $table->timestamps();
+
+            // ✅ index للبحث السريع
+            $table->index(['workflow_id', 'order_index']);
         });
     }
 

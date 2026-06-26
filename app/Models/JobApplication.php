@@ -22,16 +22,8 @@ class JobApplication extends Model
         'cv_snapshot' => 'array',
     ];
 
+// في JobApplication model أضف هذي العلاقات:
 
-    public function user()
-    {
-        return $this->belongsTo(User::class);
-    }
-
-   public function jobPost()
-    {
-        return $this->belongsTo(JobPost::class);
-    }
     public function workflow()
     {
         return $this->belongsTo(HiringWorkflow::class);
@@ -44,7 +36,17 @@ class JobApplication extends Model
 
     public function stageHistory()
     {
-        return $this->hasMany(ApplicationStageHistory::class);
+        return $this->hasMany(ApplicationStageHistory::class)
+            ->orderBy('created_at', 'desc');
+    }
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+
+   public function jobPost()
+    {
+        return $this->belongsTo(JobPost::class);
     }
     public function interviews()
     {

@@ -12,6 +12,13 @@ return [
     | based disks are available to your application for file storage.
     |
     */
+    'cv_files' => [
+        'driver'     => 'local',
+        'root'       => public_path('cv_files'),
+        'url'        => env('APP_URL') . '/cv_files',
+        'visibility' => 'public',
+        'throw'      => false,
+    ],
 
     'default' => env('FILESYSTEM_DISK', 'local'),
 

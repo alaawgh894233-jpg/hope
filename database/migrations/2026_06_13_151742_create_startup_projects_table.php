@@ -22,21 +22,24 @@ return new class extends Migration
 
             $table->string('title');
             $table->text('description');
-            $table->text('summary'); // ✅ ملخص عام يظهر للكل قبل الموافقة
+            $table->text('summary');
             $table->string('category')->nullable();
-
             $table->enum('stage', ['idea', 'in_progress', 'expanding'])->default('idea');
-            $table->json('support_types'); // ['funding', 'mentoring', 'partnership']
-
+            $table->json('support_types');
             $table->decimal('funding_goal', 12, 2)->nullable();
             $table->string('location')->nullable();
             $table->string('website_url')->nullable();
             $table->string('image')->nullable();
 
-            $table->enum('status', ['active', 'closed', 'pending'])->default('active');
+            $table->enum('status', [
+                'draft',       // ✅ الفكرة اتكتبت بس ما اتبعت دعوات
+                'inviting',    // ✅ اتبعتت دعوات وننتظر ردود
+                'in_progress', // ✅ شركة اتوافق عليها
+                'closed'       // ✅ المشروع انتهى
+            ])->default('draft');
+
             $table->unsignedInteger('views')->default(0);
             $table->unsignedInteger('offers_count')->default(0);
-
             $table->timestamps();
         });
     }

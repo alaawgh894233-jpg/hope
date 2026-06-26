@@ -4,656 +4,624 @@ namespace App\Services;
 
 use App\Models\CvAnalysis;
 use App\Models\User;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Storage;
-use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Facades\Log;
 
 class CvAnalysisService
 {
     public function __construct(
-        protected AIService           $ai,
-        protected JobMatchService     $matcher,
-        protected CvBuilderService    $cvBuilder,
-        protected EmbeddingService    $embedding,
+        protected AIService $ai,
+        protected JobMatchService $matcher,
+        protected CvBuilderService $cvBuilder,
         protected SkillInsightService $skillInsight,
+        protected CvIntegrityService $integrity,
+        protected GenericAtsScoreService $genericAts,
+    ) {}
 
-    )
-    {
-    }
+    /**
+     * ✅ التحليل الكامل للـ CV - عام لجميع المهن
+     */
     public function analyze(
         User $user,
         ?string $jobTitle = null,
         ?string $jobDescription = null,
-        ?string $company = 'general'
+        ?string $company = 'general',
+        ?array $extractedCv = null,
+        bool $mergeWithProfile = false,
     ): array {
+        // 1️⃣ بناء CV حسب المصدر
+        $cv = $this->cvBuilder->build($user);
 
-        $cacheKey = 'cv_analysis_' . md5(
-                $user->id .
-                $jobTitle .
-                $jobDescription .
-                $company
-            );
-
-        return Cache::remember($cacheKey, 3600, function () use (
-            $user,
-            $jobTitle,
-            $jobDescription
-        ) {
-
-
-            $cv = $this->cvBuilder->build($user);
-
-            $prompt = $this->buildPrompt($cv, $jobTitle, $jobDescription);
-            $aiResponse = $this->ai->ask($prompt);
-            $ai = $this->safeJson($aiResponse);
-
-            $aiAnalysis = $ai['analysis'] ?? [];
-
-            $realSkills = collect($cv['skills']['all'] ?? [])
-                ->map(fn($s) => strtolower(trim($s)))
-                ->filter()
-                ->unique()
-                ->values()
-                ->toArray();
-            $allowedStack = array_map('strtolower', $realSkills);
-            $aiAnalysis = $ai['analysis'] ?? [];
-
-            $allowedStack = $realSkills; // الآن صحيح
-            $aiAnalysis['job_roles'] = array_values(array_filter(
-                $aiAnalysis['job_roles'] ?? [],
-                function ($role) use ($allowedStack) {
-                    $text = strtolower(
-                        ($role['title'] ?? '') . ' ' .
-                        ($role['description'] ?? '')
-                    );
-
-                    foreach ($allowedStack as $skill) {
-                        if (str_contains($text, $skill)) {
-                            return collect($allowedStack)->contains(function ($skill) use ($text) {
-                                return str_contains($text, $skill);
-                            });
-                        }
-                    }
-                    return false;
-                }
-            ));
-            $aiCv = $ai['cv'] ?? [];
-
-
-            $finalCv = $cv;
-
-            $aiSummary = trim($aiCv['summary'] ?? '');
-            if (strlen($aiSummary) >= 30) {
-                $finalCv['summary'] = $aiSummary;
-            }
-
-
-            $realSkills = collect($cv['skills']['all'] ?? [])
-                ->map(fn($s) => strtolower(trim($s)))
-                ->filter()
-                ->unique()
-                ->values()
-                ->toArray();
-
-
-            $aiRecommended = collect($aiAnalysis['skills']['recommended_skills'] ?? [])
-                ->map(fn($s) => strtolower(trim($s)))
-                ->filter()
-                ->unique()
-                ->values()
-                ->toArray();
-
-
-            $skillInsights = $this->skillInsight->enrich(
-                $realSkills,
-                $aiAnalysis
-            );
-
-            $recommended = collect(array_merge(
-                $aiRecommended,
-                $skillInsights['recommended_skills'] ?? []
-            ))
-                ->map(fn($s) => strtolower(trim($s)))
-                ->filter()
-                ->unique()
-                ->reject(fn($skill) =>
-                in_array($skill, array_map('strtolower', $skillInsights['missing_skills'] ?? []))
-                )
-                ->values()
-                ->toArray();
-
-
-            if (empty($recommended)) {
-                $recommended = ['docker', 'system design', 'ci/cd'];
-            }
-
-
-            $finalCv['skills']['all'] = $realSkills;
-            $finalCv['skills']['recommended'] = $recommended;
-
-
-            $atsScore = $this->calculateAtsScore(
-                $finalCv,
-                $aiAnalysis,
-                $jobTitle ?? '',
-                $jobDescription ?? ''
-            );
-
-
-            $match = $this->matcher->match(
-                $finalCv,
-                $jobDescription ?? ''
-            );
-
-            $matchScore = (float)($match['match_score'] ?? 0);
-
-
-            $skillsText = implode(' ', $realSkills);
-            $summaryText = $finalCv['summary'] ?? '';
-
-            $experienceText = implode(' ', array_map(function ($exp) {
-                return ($exp['title'] ?? '') . ' ' .
-                    ($exp['company'] ?? '') . ' ' .
-                    implode(' ', $exp['highlights'] ?? []);
-            }, $finalCv['experience'] ?? []));
-
-            $projectsText = implode(' ', array_map(function ($project) {
-                return ($project['title'] ?? '') . ' ' .
-                    ($project['description'] ?? '');
-            }, $finalCv['projects'] ?? []));
-
-            $cvText = trim($skillsText . ' ' . $summaryText . ' ' . $experienceText . ' ' . $projectsText);
-
-            if (!empty(trim($jobDescription ?? ''))) {
-                $semanticScore = $this->semanticMatchScore($cvText, $jobDescription);
+        // ✅ normalize skills.all من كل sub-keys للملفات المرفوعة
+        if ($extractedCv !== null) {
+            $cv['skills']['all'] = array_values(array_unique(array_filter(array_merge(
+                $cv['skills']['all']         ?? [],
+                $cv['skills']['technical']   ?? [],
+                $cv['skills']['tools']       ?? [],
+                $cv['skills']['soft_skills'] ?? [],
+                $cv['skills']['languages']   ?? [],
+            ))));
+            if ($mergeWithProfile) {
+                $cv = $this->mergeWithProfile($cv, $extractedCv);
             } else {
-                $semanticScore = min(100, ($matchScore * 0.6) + ($atsScore * 0.4));
+                $cv = $extractedCv;
             }
-
-            $semanticNormalized = min(100, max(0, $semanticScore));
-
-
-            $jobReadiness = (int)($aiAnalysis['job_readiness_score'] ?? 0);
-
-
-            $marketFitScore =
-                ($atsScore * 0.4) +
-                ($semanticNormalized * 0.4) +
-                ($jobReadiness * 0.2);
-
-            $marketFit = match (true) {
-                $marketFitScore >= 80 => 'high',
-                $marketFitScore >= 55 => 'medium',
-                default => 'low',
-            };
-
-
-            $finalScore = round(
-                ($atsScore * 0.4) +
-                ($semanticNormalized * 0.4) +
-                ($matchScore * 0.2),
-                2
-            );
-
-
-            $realWeaknesses = collect(array_merge(
-                $aiAnalysis['weaknesses'] ?? [],
-                $aiAnalysis['missing_market_skills'] ?? [],
-                $skillInsights['missing_skills'] ?? []
-            ))
-                ->map(fn($s) => strtolower(trim($s)))
-                ->filter()
-                ->unique()
-                ->values()
-                ->toArray();
-
-            $improvements = array_values(array_unique(array_merge(
-                $aiAnalysis['improvements'] ?? [],
-                [
-                    'Improve ATS keyword optimization',
-                    'Add measurable project impact',
-                    'Improve semantic relevance to job roles'
-                ]
-            )));
-
-
-            $analysis = [
-
-                'ats_score' => $atsScore,
-                'match_score' => $matchScore,
-                'semantic_score' => $semanticNormalized,
-                'final_score' => $finalScore,
-                'job_readiness_score' => $jobReadiness,
-                'market_fit' => $marketFit,
-
-                'seniority_level' => $aiAnalysis['seniority_level'] ?? 'unknown',
-                'career_paths' => $aiAnalysis['career_paths'] ?? [],
-                'strengths' => $aiAnalysis['strengths'] ?? [],
-                'weaknesses' => $realWeaknesses,
-                'improvements' => $improvements,
-                'job_roles' => $aiAnalysis['job_roles'] ?? [],
-
-                'market_intelligence' =>
-                    is_array($aiAnalysis['market_intelligence'] ?? null)
-                        ? $aiAnalysis['market_intelligence']
-                        : [],
-
-                'skills' => [
-                    'all' => $realSkills,
-                    'domains' => $skillInsights['domains'] ?? [],
-                    'roles' => $skillInsights['roles'] ?? [],
-                    'recommended_skills' => $recommended,
-                    'missing_skills' => $skillInsights['missing_skills'] ?? [],
-                    'adjacent_skills' => $skillInsights['adjacent_skills'] ?? [],
-                ],
-
-                'match_breakdown' => $match['breakdown'] ?? [],
-            ];
-
-
-            $optimizedCv = $this->optimizeCv($finalCv, $analysis);
-
-
-            CvAnalysis::create([
-                'user_id' => $user->id,
-                'type' => 'cv_analysis',
-                'cv_snapshot' => $cv,
-                'cv_final' => $optimizedCv,
-                'ats_score' => $analysis['ats_score'],
-                'match_score' => $analysis['match_score'],
-                'strengths' => $analysis['strengths'],
-                'weaknesses' => $analysis['weaknesses'],
-                'suggestions' => $analysis['improvements'],
-                'source' => 'hybrid_ai_system',
-                'model' => 'llama-3.1-8b-instant',
-            ]);
-
-            return [
-//                'cv' => $finalCv,
-                'optimized_cv' => $optimizedCv,
-                'analysis' => $analysis,
-            ];
-        });
-    }
-    private function safeJson(string $text): array
-    {
-        $text = trim($text);
-        $text = preg_replace('/```json|```/', '', $text);
-        $start = strpos($text, '{');
-        $end = strrpos($text, '}');
-
-        if ($start === false || $end === false || $end <= $start) {
-            return $this->fallbackJson();
-        }
-        $json = substr($text, $start, $end - $start + 1);
-
-        $decoded = json_decode($json, true);
-
-        if (!is_array($decoded)) {
-            return $this->fallbackJson();
         }
 
-        return $this->validateAiSchema($decoded);
-    }
+        // 2️⃣ بناء الـ prompt مع قواعد صارمة
+        $prompt = $this->buildPrompt($cv, $jobTitle, $jobDescription);
+        $aiResponse = $this->ai->ask($prompt);
+        $ai = $this->safeJson($aiResponse);
 
-    private function validateAiSchema(array $data): array
-    {
-        return [
-            'cv' => $this->safeGet($data, 'cv', [
-                'header' => [],
-                'summary' => '',
-                'skills' => [
-                    'all' => [],
-                    'technical' => [],
-                    'tools' => [],
-                    'languages' => [],
-                    'soft_skills' => [],
-                    'recommended' => [],
-                ],
-                'experience' => [],
-                'education' => [],
-                'projects' => [],
-                'certifications' => [],
-                'trainings' => [],
-                'interests' => [],
-            ]),
+        $aiAnalysis = $ai['analysis'] ?? [];
+        $aiCv       = $ai['cv'] ?? [];
 
-            'analysis' => $this->safeGet($data, 'analysis', [
-                'ats_score' => 0,
-                'match_score' => 0,
-                'job_readiness_score' => 0,
-                'hiring_probability' => 0,
+        // ✅ جمع كل المصطلحات الحقيقية من CV
+        $realSkills = collect($cv['skills']['all'] ?? [])
+            ->map(fn($s) => mb_strtolower(trim((string) $s)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->toArray();
 
-                'market_fit' => 'low',
-                'seniority_level' => 'junior',
+        $allEvidencedTerms = collect($realSkills);
+        foreach ($cv['experience'] ?? [] as $exp) {
+            foreach (($exp['technologies'] ?? []) as $tech) {
+                $allEvidencedTerms->push(mb_strtolower(trim((string) $tech)));
+            }
+            $allEvidencedTerms->push(mb_strtolower($exp['title'] ?? ''));
+        }
+        foreach ($cv['projects'] ?? [] as $proj) {
+            foreach (($proj['technologies'] ?? []) as $tech) {
+                $allEvidencedTerms->push(mb_strtolower(trim((string) $tech)));
+            }
+        }
+        $allEvidencedTerms = $allEvidencedTerms
+            ->filter(fn($t) => mb_strlen($t) > 2)
+            ->unique()
+            ->values()
+            ->toArray();
 
-                'strengths' => [],
-                'weaknesses' => [],
-                'improvements' => [],
+        // ✅ فلترة job_roles
+        $aiAnalysis['job_roles'] = $this->filterJobRolesByActualTerms(
+            $aiAnalysis['job_roles'] ?? [],
+            $allEvidencedTerms
+        );
 
-                'missing_market_skills' => [],
-                'job_roles' => [],
-                'career_paths' => [],
+        // 3️⃣ دمج تحسينات الـ summary
+        $finalCv    = $cv;
+        $aiSummary  = trim($aiCv['summary'] ?? '');
+        if (mb_strlen($aiSummary) >= 30 && !$this->containsUnfoundedNumbers($aiSummary, $cv)) {
+            $finalCv['summary'] = $aiSummary;
+        }
 
-                'skill_domains' => [],
+        // 4️⃣ معالجة المهارات
+        $aiRecommended = collect(($aiAnalysis['skills'] ?? [])['recommended_skills'] ?? [])
+            ->map(fn($s) => mb_strtolower(trim((string) $s)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->toArray();
 
-                'skills' => [
-                    'strong_skills' => [],
-                    'missing_skills' => [],
-                    'recommended_skills' => [],
-                    'adjacent_skills' => [],
-                ],
+        $skillInsights = $this->skillInsight->enrich($realSkills, $aiAnalysis);
 
-                'market_intelligence' => [
-                    'industry_fit' => [],
-                    'top_matching_domains' => [],
-                    'market_competitiveness' => '',
-                    'salary_potential' => '',
-                    'learning_priority' => [],
-                    'top_company_fit' => [],
-                ],
-            ]),
-        ];
-    }
+        $recommended = collect(array_merge($aiRecommended, $skillInsights['recommended_skills'] ?? []))
+            ->map(fn($s) => mb_strtolower(trim((string) $s)))
+            ->filter()
+            ->unique()
+            ->reject(fn($skill) => in_array($skill, $realSkills))
+            ->reject(fn($skill) => in_array($skill, array_map('mb_strtolower', $skillInsights['missing_skills'] ?? [])))
+            ->values()
+            ->toArray();
 
-    private function safeGet(array $data, string $key, array $default = [])
-    {
-        return isset($data[$key]) && is_array($data[$key])
-            ? $data[$key]
-            : $default;
-    }
+        if (empty($recommended)) {
+            $recommended = $this->getUniversalRecommendations($realSkills);
+        }
 
-    private function fallbackJson(): array
-    {
-        return [
-            'cv' => [],
-            'analysis' => [
-                'ats_score' => 0,
-                'match_score' => 0,
-                'job_readiness_score' => 0,
-                'hiring_probability' => 0,
-                'market_fit' => 'low',
-                'seniority_level' => 'unknown',
-                'strengths' => [],
-                'weaknesses' => [],
-                'improvements' => [],
-                'missing_market_skills' => [],
-                'job_roles' => [],
-                'career_paths' => [],
-                'skill_domains' => [],
-                'skills' => [],
-                'market_intelligence' => [],
-            ],
-        ];
-    }
+        $finalCv['skills']['all']         = $realSkills;
+        $finalCv['skills']['recommended'] = $recommended;
 
-    private function marketFit(int $ats, int $jobReadiness): string
-    {
-        $score = ($ats * 0.6) + ($jobReadiness * 0.4);
+        // 5️⃣ حساب ATS Score
+        $atsResult = $this->genericAts->calculate(
+            $finalCv,
+            $jobTitle ?? '',
+            $jobDescription ?? ''
+        );
+        $atsScore = $atsResult['score'];
 
-        return match (true) {
-            $score >= 80 => 'high',
-            $score >= 50 => 'medium',
-            default => 'low',
+        // 6️⃣ حساب Match Score
+        $match      = $this->matcher->match($finalCv, $jobDescription ?? '');
+        $matchScore = (int) ($match['match_score'] ?? 0);
+
+        // 7️⃣ حساب Semantic Score
+        $semanticScore = $this->calculateSemanticScore(
+            $finalCv,
+            $jobDescription ?? '',
+            $matchScore,
+            $atsScore
+        );
+
+        // 8️⃣ حساب سنوات الخبرة الكلية
+        $totalYears      = $this->calculateTotalExperienceYears($cv);
+        $experienceCount = count($cv['experience'] ?? []);
+        $projectCount    = count($cv['projects'] ?? []);
+        $certCount       = count($cv['certifications'] ?? []);
+
+        // 9️⃣ حساب seniority
+        $calculatedSeniority = $this->calculateSeniorityFromEvidence($totalYears, $experienceCount, $projectCount);
+
+        // 🔟 Job Readiness
+        $aiJobReadiness      = (int) ($aiAnalysis['job_readiness_score'] ?? 0);
+        $maxPossibleReadiness = (int) min(100,
+            (count($realSkills) * 4) +
+            ($experienceCount * 15) +
+            ($projectCount * 8) +
+            ($certCount * 8) +
+            min(25, $totalYears * 5)
+        );
+        $jobReadiness = min($aiJobReadiness, $maxPossibleReadiness);
+        $jobReadiness = max(0, $jobReadiness);
+
+        // 1️⃣1️⃣ Market Fit
+        $marketFitScore = ($atsScore * 0.4) + ($semanticScore * 0.4) + ($jobReadiness * 0.2);
+        $marketFit = match (true) {
+            $marketFitScore >= 80 => 'high',
+            $marketFitScore >= 55 => 'medium',
+            default               => 'low',
         };
+
+        // 1️⃣2️⃣ Final Score
+        $finalScore = round(
+            ($atsScore * 0.4) + ($semanticScore * 0.4) + ($matchScore * 0.2),
+            2
+        );
+
+        // ✅ FIX: استخراج missing_market_skills بأمان مع fallback فارغ
+        $missingMarketSkills = is_array($aiAnalysis['missing_market_skills'] ?? null)
+            ? $aiAnalysis['missing_market_skills']
+            : [];
+
+        // 1️⃣3️⃣ نقاط الضعف
+        $realWeaknesses = collect(array_merge(
+            $aiAnalysis['weaknesses'] ?? [],
+            $missingMarketSkills,
+            $skillInsights['missing_skills'] ?? []
+        ))
+            ->map(fn($s) => mb_strtolower(trim((string) $s)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->toArray();
+
+        // 1️⃣4️⃣ التحسينات المقترحة
+        $improvements = array_values(array_unique(array_merge(
+            $aiAnalysis['improvements'] ?? [],
+            [
+                'Improve ATS keyword optimization for target roles',
+                'Add quantifiable achievements and metrics to experience',
+                'Strengthen alignment with target job requirements',
+            ]
+        )));
+
+        // 1️⃣5️⃣ Career paths
+        $careerPaths = $this->buildUniversalCareerPaths(
+            $aiAnalysis['career_paths'] ?? [],
+            $allEvidencedTerms,
+            $calculatedSeniority,
+            $cv['header']['title'] ?? ''
+        );
+
+        // 1️⃣6️⃣ Strengths
+        $strengths = $this->buildEvidenceBasedStrengths($aiAnalysis['strengths'] ?? [], $cv);
+
+        // 1️⃣7️⃣ البناء النهائي للتحليل
+        $analysis = [
+            'ats_score'              => $atsScore,
+            'match_score'            => $matchScore,
+            'semantic_score'         => round($semanticScore, 2),
+            'final_score'            => $finalScore,
+            'job_readiness_score'    => $jobReadiness,
+            'total_experience_years' => round($totalYears, 1),
+            'market_fit'             => $marketFit,
+            'seniority_level'        => $calculatedSeniority,
+            'career_paths'           => $careerPaths,
+            'strengths'              => $strengths,
+            'weaknesses'             => $realWeaknesses,
+            'improvements'           => $improvements,
+            'job_roles'              => $aiAnalysis['job_roles'] ?? [],
+            'market_intelligence'    => is_array($aiAnalysis['market_intelligence'] ?? null)
+                ? $aiAnalysis['market_intelligence']
+                : [],
+            'skills' => [
+                'all'                => $realSkills,
+                'domains'            => $skillInsights['domains'] ?? [],
+                'roles'              => $skillInsights['roles'] ?? [],
+                'recommended_skills' => $recommended,
+                'matched_keywords'   => $atsResult['matched_keywords'] ?? [],
+                'missing_keywords'   => $atsResult['missing_keywords'] ?? [],
+                'adjacent_skills'    => $skillInsights['adjacent_skills'] ?? [],
+            ],
+            'match_breakdown' => $match['breakdown'] ?? [],
+        ];
+
+        // 1️⃣8️⃣ حفظ التحليل في قاعدة البيانات
+        try {
+            CvAnalysis::create([
+                'user_id'         => $user->id,
+                'type'            => 'cv_analysis',
+                'cv_snapshot'     => $cv,
+                'cv_final'        => $finalCv,
+                'ats_score'       => $analysis['ats_score'],
+                'match_score'     => $analysis['match_score'],
+                'final_score'     => $analysis['final_score'],
+                'job_title'       => $jobTitle,
+                'job_description' => $jobDescription,
+                'company'         => $company,
+                'strengths'       => $strengths,
+                'weaknesses'      => $realWeaknesses,
+                'suggestions'     => $improvements,
+                'source'          => 'hybrid_ai_system_universal',
+                'model'           => 'llama-3.1-8b-instant',
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to save CV analysis: ' . $e->getMessage());
+        }
+
+        return [
+            'optimized_cv' => $finalCv,
+            'analysis'     => $analysis,
+        ];
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  PRIVATE HELPERS
+    // ─────────────────────────────────────────────────────────────
 
+    /**
+     * ✅ دمج بيانات الملف مع البروفايل المحفوظ
+     */
+    private function mergeWithProfile(array $profile, array $extracted): array
+    {
+        // ✅ جمع كل مهارات الملف من كل الـ sub-keys الممكنة
+        $extractedAllSkills = array_values(array_unique(array_filter(array_merge(
+            $extracted['skills']['all']        ?? [],
+            $extracted['skills']['technical']  ?? [],
+            $extracted['skills']['tools']      ?? [],
+            $extracted['skills']['soft_skills'] ?? [],
+            $extracted['skills']['languages']  ?? [],
+        ))));
+
+        $profileAllSkills = $profile['skills']['all'] ?? [];
+
+        return [
+            'header'         => !empty($extracted['header']) ? $extracted['header'] : ($profile['header'] ?? []),
+            'summary'        => !empty($extracted['summary']) ? $extracted['summary'] : ($profile['summary'] ?? ''),
+            'skills'         => [
+                'all' => array_values(array_unique(array_merge(
+                    $profileAllSkills,
+                    $extractedAllSkills,
+                ))),
+            ],
+            'experience'     => array_merge($profile['experience'] ?? [], $extracted['experience'] ?? []),
+            'education'      => array_merge($profile['education'] ?? [], $extracted['education'] ?? []),
+            'projects'       => array_merge($profile['projects'] ?? [], $extracted['projects'] ?? []),
+            'certifications' => array_merge($profile['certifications'] ?? [], $extracted['certifications'] ?? []),
+            'languages'      => array_merge($profile['languages'] ?? [], $extracted['languages'] ?? []),
+        ];
+    }
+    /**
+     * ✅ فلترة job_roles بناءً على المصطلحات الحقيقية فقط
+     */
+    private function filterJobRolesByActualTerms(array $jobRoles, array $realTerms): array
+    {
+        return array_values(array_filter($jobRoles, function ($role) use ($realTerms) {
+            $roleText = mb_strtolower(
+                ($role['title'] ?? '') . ' ' .
+                ($role['description'] ?? '') . ' ' .
+                ($role['industry'] ?? '')
+            );
+            foreach ($realTerms as $term) {
+                if (mb_strlen($term) >= 3 && str_contains($roleText, $term)) {
+                    return true;
+                }
+            }
+            return false;
+        }));
+    }
+
+    /**
+     * ✅ حساب السنيوريتي بناء على الأدلة فقط
+     */
+    private function calculateSeniorityFromEvidence(float $totalYears, int $expCount, int $projectCount): string
+    {
+        if ($totalYears >= 5 || ($expCount >= 3 && $projectCount >= 3)) {
+            return 'senior';
+        }
+        if ($totalYears >= 2 || ($expCount >= 1 && $projectCount >= 1)) {
+            return 'mid';
+        }
+        return 'junior';
+    }
+
+    /**
+     * ✅ حساب مجموع سنوات الخبرة
+     */
+    private function calculateTotalExperienceYears(array $cv): float
+    {
+        $total = 0;
+        foreach ($cv['experience'] ?? [] as $exp) {
+            if (empty($exp['start_date'])) continue;
+            try {
+                $start  = new \DateTime($exp['start_date']);
+                $end    = !empty($exp['end_date']) ? new \DateTime($exp['end_date']) : new \DateTime();
+                $total += ($end->getTimestamp() - $start->getTimestamp()) / (365.25 * 24 * 60 * 60);
+            } catch (\Exception) {
+                continue;
+            }
+        }
+        return max(0, round($total, 1));
+    }
+
+    /**
+     * ✅ التحقق من عدم وجود أرقام مخترعة في النص
+     */
+    private function containsUnfoundedNumbers(string $candidateText, array $originalCv): bool
+    {
+        preg_match_all('/\d+/', $candidateText, $candidateNums);
+        $candidateNums = array_unique($candidateNums[0] ?? []);
+
+        if (empty($candidateNums)) return false;
+
+        preg_match_all('/\d+/', json_encode($originalCv), $originalNums);
+        $originalNums = array_unique($originalNums[0] ?? []);
+
+        foreach ($candidateNums as $num) {
+            if ((int) $num <= 10) continue;
+            if (!in_array($num, $originalNums, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * ✅ نقاط قوة مبنية على أدلة حقيقية
+     */
+    private function buildEvidenceBasedStrengths(array $aiStrengths, array $cv): array
+    {
+        $strengths = [];
+
+        if (count($cv['experience'] ?? []) > 0) {
+            $strengths[] = 'Has professional work experience in the field';
+        }
+        if (count($cv['education'] ?? []) > 0) {
+            $strengths[] = 'Relevant educational background';
+        }
+        if (count($cv['certifications'] ?? []) > 0) {
+            $strengths[] = 'Holds professional certifications';
+        }
+        if (count($cv['projects'] ?? []) > 0) {
+            $strengths[] = 'Practical project experience';
+        }
+        if (count($cv['skills']['all'] ?? []) >= 5) {
+            $strengths[] = 'Diverse skill set';
+        }
+
+        foreach ($aiStrengths as $aiStrength) {
+            $text = mb_strtolower((string) $aiStrength);
+            foreach ($cv['skills']['all'] ?? [] as $skill) {
+                if (str_contains($text, mb_strtolower((string) $skill))) {
+                    $strengths[] = $aiStrength;
+                    break;
+                }
+            }
+        }
+
+        return array_values(array_unique($strengths));
+    }
+
+    /**
+     * ✅ مسارات وظيفية عامة
+     */
+    private function buildUniversalCareerPaths(
+        array $aiCareerPaths,
+        array $realTerms,
+        string $seniority,
+        string $currentTitle
+    ): array {
+        $filtered = [];
+        foreach ($aiCareerPaths as $path) {
+            $pathText = is_string($path) ? mb_strtolower($path) : mb_strtolower(json_encode($path));
+            foreach ($realTerms as $term) {
+                if (mb_strlen($term) >= 3 && str_contains($pathText, $term)) {
+                    $filtered[] = $path;
+                    break;
+                }
+            }
+        }
+
+        if (empty($filtered)) {
+            $title  = $currentTitle ?: 'Professional';
+            $levels = [
+                'junior' => ['Entry-level ' . $title, 'Mid-level ' . $title, 'Senior ' . $title],
+                'mid'    => ['Mid-level ' . $title, 'Senior ' . $title, 'Lead ' . $title],
+                'senior' => ['Senior ' . $title, 'Lead ' . $title, 'Subject Matter Expert'],
+            ];
+            $filtered = $levels[$seniority] ?? [
+                    'Entry-level Professional',
+                    'Mid-level Professional',
+                    'Senior Professional',
+                ];
+        }
+
+        return array_slice($filtered, 0, 3);
+    }
+
+    /**
+     * ✅ توصيات عامة لكل المهن
+     */
+    private function getUniversalRecommendations(array $existingSkills): array
+    {
+        $existingLower = array_map('mb_strtolower', $existingSkills);
+
+        $universalRecommendations = [
+            'quantifiable achievements in experience descriptions',
+            'professional certifications in your field',
+            'industry-standard software proficiency',
+            'clear professional summary tailored to target roles',
+            'time management and organization skills',
+            'team collaboration experience',
+            'ongoing professional development',
+            'improvement of technical writing skills',
+            'project documentation skills',
+            'client communication skills',
+            'leadership examples for senior roles',
+        ];
+
+        $result = [];
+        foreach ($universalRecommendations as $rec) {
+            if (!in_array($rec, $existingLower)) {
+                $result[] = $rec;
+                if (count($result) >= 5) break;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * ✅ حساب Semantic Score عام
+     */
+    private function calculateSemanticScore(
+        array $cv,
+        string $jobDescription,
+        float $matchScore,
+        float $atsScore
+    ): float {
+        if (empty(trim($jobDescription))) {
+            return min(100, ($matchScore * 0.6) + ($atsScore * 0.4));
+        }
+
+        $cvParts = [
+            ...($cv['skills']['all'] ?? []),
+            $cv['summary'] ?? '',
+        ];
+
+        foreach ($cv['experience'] ?? [] as $exp) {
+            $cvParts[] = $exp['title'] ?? '';
+            $cvParts[] = $exp['company'] ?? '';
+            $cvParts[] = implode(' ', $exp['highlights'] ?? []);
+            $cvParts[] = implode(' ', $exp['technologies'] ?? []);
+        }
+
+        foreach ($cv['projects'] ?? [] as $proj) {
+            $cvParts[] = $proj['title'] ?? '';
+            $cvParts[] = $proj['description'] ?? '';
+            $cvParts[] = implode(' ', $proj['technologies'] ?? []);
+        }
+
+        foreach ($cv['certifications'] ?? [] as $cert) {
+            $cvParts[] = $cert['name'] ?? '';
+        }
+
+        $cvText  = mb_strtolower(implode(' ', array_filter($cvParts)));
+        $jobText = mb_strtolower($jobDescription);
+
+        $stopWords = ['and','or','the','with','for','of','in','to','a','an','is','are','will',
+            'have','has','we','you','our','your','years','experience','able','must',
+            'should','looking','need','required'];
+
+        $jobWords = array_values(array_unique(array_filter(
+            preg_split('/[\s,.!?;:()\[\]{}"\'\-]+/u', $jobText),
+            fn($w) => mb_strlen($w) > 3 && !in_array($w, $stopWords)
+        )));
+
+        if (empty($jobWords)) return 0;
+
+        $matchedCount = 0;
+        foreach ($jobWords as $word) {
+            if (str_contains($cvText, $word)) {
+                $matchedCount++;
+            }
+        }
+
+        return min(100, max(0, ($matchedCount / count($jobWords)) * 100));
+    }
+
+    /**
+     * ✅ بناء Prompt عام لكل المهن
+     */
     private function buildPrompt(array $cv, ?string $jobTitle, ?string $jobDescription): string
     {
-        return "
-You are an advanced CV Analysis and ATS Optimization Engine.
+        $compactCv = [
+            'name'          => $cv['header']['name'] ?? '',
+            'current_title' => $cv['header']['title'] ?? '',
+            'summary'       => $cv['summary'] ?? '',
+            'skills_all'    => $cv['skills']['all'] ?? [],
+            'experience'    => array_map(fn($e) => [
+                'title'        => $e['title'] ?? '',
+                'company'      => $e['company'] ?? '',
+                'years'        => $this->calculateYearsDiff($e['start_date'] ?? null, $e['end_date'] ?? null),
+                'highlights'   => $e['highlights'] ?? [],
+                'technologies' => $e['technologies'] ?? [],
+            ], $cv['experience'] ?? []),
+            'education'      => $cv['education'] ?? [],
+            'projects'       => $cv['projects'] ?? [],
+            'certifications' => $cv['certifications'] ?? [],
+        ];
 
-You analyze CVs across ALL industries including:
-Software, Engineering, Business, Finance, Marketing, Design, Healthcare, Education, and General professions.
+        $skillsList = implode(', ', $cv['skills']['all'] ?? []);
 
-━━━━━━━━━━━━━━━━━━
-CRITICAL RULES (NON-NEGOTIABLE)
-━━━━━━━━━━━━━━━━━━
-
-1. NEVER INVENT FACTUAL DATA
-Do NOT create:
-- fake jobs, companies, dates, projects, or certifications
-
-2. YOU MAY:
-- improve wording professionally
-- normalize structure and formatting
-- infer seniority level
-- infer missing skills realistically
-- infer career paths based on evidence
-- enhance summaries and descriptions professionally
-
-3. DO NOT:
-- change facts (company names, titles, education)
-- duplicate skills in multiple fields
-- mix roles inside skills arrays
-- output inconsistent scoring
-
-4. ALL OUTPUT MUST BE:
-- valid JSON only
-- no markdown
-- no explanations
-- no extra text
-
-5. ALL ARRAYS MUST BE VALID
-- must never contain empty or irrelevant placeholders
-- must not include duplicates
+        return "You are a universal ATS CV analyzer for ALL PROFESSIONS (works for engineering, accounting, medicine, business, education, trades, design, technology, etc.)
 
 ━━━━━━━━━━━━━━━━━━
-SKILL RULES
+CRITICAL NON-NEGOTIABLE RULES (THESE OVERRIDE ALL OTHER INSTRUCTIONS):
 ━━━━━━━━━━━━━━━━━━
+1. NEVER INVENT ANY FACTS, SKILLS, OR EXPERIENCE THAT DO NOT EXPLICITLY EXIST IN THE CV.
+2. THE CV HAS THESE SKILLS ONLY: [{$skillsList}]
+   → You MUST NOT suggest or mention ANY skills/tools/technologies NOT in this list.
+   → Example: If the list does NOT contain 'Java', 'React', 'Python', 'machine learning', 'data science', you MUST NEVER MENTION THEM.
+3. SENIORITY MUST BE BASED ONLY ON EVIDENCE:
+   - junior: less than 2 years experience OR fewer than 2 projects
+   - mid: 2-5 years OR multiple real projects
+   - senior: 5+ years OR clear leadership/architecture experience
+   → DEFAULT TO JUNIOR IN CASE OF DOUBT. NEVER UPGRADE WITHOUT CLEAR EVIDENCE.
+4. JOB ROLES MUST MATCH THE CV'S DOMAIN EXACTLY.
+5. RECOMMENDED SKILLS MUST BE DIRECTLY RELATED TO THE EXISTING SKILLS.
+6. ALL SCORES MUST BE REALISTIC AND CONSERVATIVE. DO NOT INFLATE SCORES.
+7. RETURN ONLY VALID JSON. NO MARKDOWN, NO EXPLANATIONS, NO COMMENTS.
 
-skills.all:
-- only REAL skills from CV (normalized)
+CV DATA (DO NOT ADD ANY FACTS TO THIS):
+" . json_encode($compactCv, JSON_UNESCAPED_UNICODE) . "
 
-skills.recommended:
-- future growth skills only (not currently present)
-
-skills.missing_skills:
-- skills required for improvement or industry standards
-
-skills.adjacent_skills:
-- related technologies, not duplicates of other arrays
-
-IMPORTANT:
-- Do NOT repeat same skill in multiple arrays unless absolutely necessary
-- Do NOT place roles, salary, or seniority inside skills
-
-━━━━━━━━━━━━━━━━━━
-ROLE INFERENCE RULES
-━━━━━━━━━━━━━━━━━━
-
-job_roles MUST be:
-
-Array of objects:
-{
-  title: string,
-  industry: string,
-  seniority: string (junior|mid|senior),
-  description: string
-}
-
-- Must be realistic
-- Must not include random keywords
-- Must be based on CV evidence only
+TARGET JOB TITLE: " . ($jobTitle ?: 'General CV improvement') . "
+TARGET JOB DESCRIPTION: " . ($jobDescription ?: 'General professional CV improvement across all fields') . "
 
 ━━━━━━━━━━━━━━━━━━
-SCORING RULES
+RETURN THIS EXACT JSON STRUCTURE:
 ━━━━━━━━━━━━━━━━━━
-
-- ATS score: 0–100 (keyword + structure + relevance)
-- match score: 0–100 (job alignment if provided)
-- semantic score: 0–100 (text similarity)
-- final score: weighted average, realistic
-- job_readiness_score: 0–100 realistic (no inflation)
-
-If CV is weak → scores MUST reflect that
-
-━━━━━━━━━━━━━━━━━━
-IMPROVEMENT RULES
-━━━━━━━━━━━━━━━━━━
-NO OUTSIDE TECHNOLOGY INFERENCE
-Do NOT introduce technologies not supported by:
-- experience
-- projects
-- certifications
-- or explicit CV skills
-SENIORITY RULE (VERY IMPORTANT)
-- Do NOT infer senior or lead level unless CV explicitly shows:
-  - 5+ years real experience OR
-  - multiple complex projects OR
-  - leadership mentions in experience
-- Otherwise default to junior or mid-level
-JOB ROLE STRICT RULE
-job_roles MUST ONLY use:
-- technologies present in CV
-- OR directly inferred from experience
-
-Never introduce new stacks (React, Node, etc) if not present
-MUST exist in:
-- cv.skills
-- cv.experience
-- cv.projects
-- cv.certifications
-DO NOT infer roles outside CV domain.
-
-If CV is backend:
-→ allowed: backend, full stack (light)
-→ forbidden: data science, AI, ML, DevOps senior roles, cloud engineer
-unless explicitly supported
-seniority rules:
-- junior: 0–2 years or simple projects
-- mid: 2–5 years + real projects
-- senior: 5+ years + leadership + architecture
-
-If unclear → default DOWN not UP
-NEVER upgrade seniority beyond evidence in CV.
-If unsure → downgrade not upgrade.
-Do NOT introduce technologies not explicitly present in:
-- CV skills
-- projects
-- experience
-job_roles must strictly match CV domain:
-If backend → only backend-related roles
-Never introduce full-stack unless frontend exists
-Never introduce ML, Data Science, Cloud Engineer unless explicit signals exist
-Seniority rules:
-- junior: simple experience / single project
-- mid: multiple real projects or experience
-- senior: 5+ years + leadership + architecture evidence
-
-Default to LOWER level if uncertain
-strengths must ONLY be derived from:
-- experience highlights
-- skills list
-- certifications
-
-Never infer personality traits (communication, leadership) without evidence
-
-
-Career paths must be:
-- directly adjacent to current stack only
-Example:
-Laravel → Backend Developer → PHP Engineer → API Engineer
-NOT:
-Data Scientist / ML / Cloud Architect unless evidence exists
-Default seniority rules:
-- 1 project + no enterprise experience = junior/mid-
-- mid requires multiple projects or real company experience
-- senior requires leadership + system design + scale evidence
-
-NEVER upgrade seniority based on adjectives in summary
-Do not introduce programming languages not explicitly present in CV.
-Career paths and job_roles MUST be strictly derived from:
-- experience technologies
-- project technologies
-- explicit skills
-
-DO NOT introduce new domains (ML, Data Science, Cloud, Java, Python) unless present in CV
-Example:
-If React is not in CV → NEVER include it in any field
-improvements MUST include:
-- ATS optimization
-- technical growth
-- project improvement
-- skill gaps
-
-No generic motivational phrases only
-
-━━━━━━━━━━━━━━━━━━
-SKILL EXPANSION LOGIC
-━━━━━━━━━━━━━━━━━━
-
-Infer only realistic related skills:
-
-If Laravel:
-- PHP, REST API, MySQL, MVC, Eloquent, JWT
-
-If AWS:
-- Cloud, CI/CD, Docker, Infrastructure
-
-If React:
-- JavaScript, SPA, state management
-
-━━━━━━━━━━━━━━━━━━
-OUTPUT FORMAT (STRICT)
-━━━━━━━━━━━━━━━━━━
-
-Return EXACT JSON:
-
 {
   \"cv\": {
-    \"header\": {},
-    \"summary\": \"\",
-    \"skills\": {
-      \"all\": [],
-      \"technical\": [],
-      \"tools\": [],
-      \"languages\": [],
-      \"soft_skills\": [],
-      \"recommended\": []
-    },
-    \"experience\": [],
-    \"education\": [],
-    \"projects\": [],
-    \"certifications\": [],
-    \"trainings\": [],
-    \"interests\": []
+    \"summary\": \"Professional summary (improve wording only, keep all facts, do not add numbers or facts not present)\",
+    \"skills\": { \"all\": [], \"recommended\": [] }
   },
-
   \"analysis\": {
     \"ats_score\": 0,
     \"match_score\": 0,
-    \"semantic_score\": 0,
-    \"final_score\": 0,
     \"job_readiness_score\": 0,
-
     \"market_fit\": \"low|medium|high\",
     \"seniority_level\": \"junior|mid|senior\",
-
     \"strengths\": [],
     \"weaknesses\": [],
     \"improvements\": [],
-
-    \"job_roles\": [
-      {
-        \"title\": \"\",
-        \"industry\": \"\",
-        \"seniority\": \"\",
-        \"description\": \"\"
-      }
-    ],
-
+    \"missing_market_skills\": [],
+    \"job_roles\": [{ \"title\": \"\", \"industry\": \"\", \"seniority\": \"\", \"description\": \"\" }],
     \"career_paths\": [],
-
     \"skills\": {
       \"strong_skills\": [],
       \"missing_skills\": [],
       \"recommended_skills\": [],
       \"adjacent_skills\": []
     },
-
     \"market_intelligence\": {
       \"industry_fit\": \"\",
       \"top_matching_domains\": [],
@@ -664,252 +632,124 @@ Return EXACT JSON:
     }
   }
 }
+
+JSON ONLY - NO OTHER TEXT.
 ";
     }
 
-    private function calculateAtsScore(
-        array  $cv,
-        array  $aiAnalysis,
-        string $jobTitle = '',
-        string $jobDescription = ''
-    ): int
+    private function calculateYearsDiff(?string $start, ?string $end): float
     {
+        if (!$start) return 0;
+        try {
+            $startTs = strtotime($start);
+            $endTs   = $end ? strtotime($end) : time();
+            return max(0, round(($endTs - $startTs) / (365.25 * 24 * 60 * 60), 1));
+        } catch (\Exception) {
+            return 0;
+        }
+    }
 
-        $score = 0;
+    /**
+     * ✅ فك JSON بأمان
+     */
+    private function safeJson(string $text): array
+    {
+        $text  = trim($text);
+        $text  = preg_replace('/```json|```/', '', $text);
+        $start = strpos($text, '{');
+        $end   = strrpos($text, '}');
 
-        $jobText = strtolower(trim($jobTitle . ' ' . $jobDescription));
-
-        $skills = collect($cv['skills']['all'] ?? [])
-            ->map(fn($s) => strtolower(trim($s)))
-            ->filter()
-            ->unique();
-
-        /*
-        |----------------------------
-        | 1. HARD SKILL MATCH (Core ATS)
-        |----------------------------
-        */
-        $matched = $skills->filter(function ($skill) use ($jobText) {
-            return str_contains($jobText, $skill);
-        });
-
-        $skillRatio = $skills->count() > 0
-            ? $matched->count() / $skills->count()
-            : 0;
-
-        // nonlinear scoring (real ATS behavior)
-        $score += pow($skillRatio, 0.7) * 35;
-
-
-        /*
-        |----------------------------
-        | 2. JOB TITLE ALIGNMENT (high weight in real ATS)
-        |----------------------------
-        */
-        if (!empty($jobTitle)) {
-            $titleTokens = collect(explode(' ', strtolower($jobTitle)))
-                ->filter(fn($w) => strlen($w) > 2);
-
-            $titleHits = $titleTokens->filter(
-                fn($w) => $skills->contains($w)
-            )->count();
-
-            $score += min(12, $titleHits * 4);
+        if ($start === false || $end === false || $end <= $start) {
+            Log::warning('AI response had no valid JSON structure');
+            return $this->fallbackJson();
         }
 
-        /*
-        |----------------------------
-        | 3. EXPERIENCE DEPTH (log-based realism)
-        |----------------------------
-        */
-        $exp = count($cv['experience'] ?? []);
+        $jsonStr = substr($text, $start, $end - $start + 1);
 
-        $score += match (true) {
-            $exp >= 7 => 18,
-            $exp >= 4 => 14,
-            $exp >= 2 => 9,
-            $exp >= 1 => 5,
-            default => 0,
-        };
-
-        /*
-        |----------------------------
-        | 4. PROJECT QUALITY SIGNAL (not just count)
-        |----------------------------
-        */
-        $projects = count($cv['projects'] ?? []);
-
-        $score += min(14, ($projects * 3.5));
-
-        /*
-        |----------------------------
-        | 5. EDUCATION SIGNAL (boolean weighted)
-        |----------------------------
-        */
-        if (!empty($cv['education'])) {
-            $score += 6;
-        }
-
-        /*
-        |----------------------------
-        | 6. SUMMARY NLP QUALITY
-        |----------------------------
-        */
-        $summaryLen = strlen($cv['summary'] ?? '');
-
-        if ($summaryLen > 250) $score += 7;
-        elseif ($summaryLen > 120) $score += 5;
-        elseif ($summaryLen > 60) $score += 2;
-
-        /*
-        |----------------------------
-        | 7. MODERN STACK SIGNAL (real recruiter bias)
-        |----------------------------
-        */
-        $techWeights = [
-            'docker' => 2.5,
-            'kubernetes' => 3,
-            'aws' => 2.5,
-            'microservices' => 3,
-            'redis' => 2,
-            'ci' => 1.5,
-            'cd' => 1.5,
-            'react' => 2,
-            'laravel' => 2,
-        ];
-
-        foreach ($techWeights as $tech => $w) {
-            if ($skills->contains($tech)) {
-                $score += $w;
+        try {
+            $decoded = json_decode($jsonStr, true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($decoded)) {
+                return $this->fallbackJson();
             }
+            return $this->validateAiSchema($decoded);
+        } catch (\JsonException $e) {
+            Log::warning('JSON decode failed: ' . $e->getMessage());
+            return $this->fallbackJson();
         }
-
-        /*
-        |----------------------------
-        | 8. KEYWORD DENSITY (anti-spam weighted)
-        |----------------------------
-        */
-        $total = max(1, $skills->count());
-        $density = $matched->count() / $total;
-
-        $score += $density * 12;
-
-        /*
-        |----------------------------
-        | 9. CONTEXTUAL JOB MATCH BOOST (semantic hinting)
-        |----------------------------
-        */
-        $jobTokens = collect(explode(' ', $jobText))
-            ->filter(fn($w) => strlen($w) > 3)
-            ->unique();
-
-        $contextHits = $jobTokens->filter(
-            fn($w) => $skills->contains($w)
-        )->count();
-
-        $score += min(8, $contextHits * 2);
-
-        /*
-        |----------------------------
-        | 10. STRUCTURE PENALTIES (real ATS rejection logic)
-        |----------------------------
-        */
-        if (empty($cv['skills']['all'])) $score -= 12;
-        if (empty($cv['experience'])) $score -= 10;
-        if (empty($cv['projects'])) $score -= 6;
-        if (empty($cv['summary'])) $score -= 6;
-
-        /*
-        |----------------------------
-        | 11. ATS NORMALIZATION (real distribution curve)
-        |----------------------------
-        */
-        $score = max(0, min(100, $score));
-
-        /*
-        |----------------------------
-        | 12. REAL WORLD BIAS SIMULATION
-        | (junior inflation + senior strictness)
-        |----------------------------
-        */
-        if ($exp <= 1 && $score > 85) {
-            $score = 85; // prevent unrealistic inflation
-        }
-
-        if ($exp >= 5 && $score < 30) {
-            $score += 5; // baseline recruiter leniency
-        }
-
-        return (int)round($score);
     }
 
-
-
-    private function semanticMatchScore(string $cvText, string $jobText): float
-{
-    if (trim($jobText) === '') {
-        return 0;
-    }
-
-    $cvVector = $this->embedding->embed($cvText);
-    $jobVector = $this->embedding->embed($jobText);
-
-    if (empty($cvVector) || empty($jobVector)) {
-        return 0;
-    }
-
-    $similarity = $this->cosine($cvVector, $jobVector);
-
-    return round($similarity * 100, 2);
-}
-    private function cosine(array $a, array $b): float
+    /**
+     * ✅ تصديق schema القادم من AI
+     */
+    private function validateAiSchema(array $data): array
     {
-        $dot = 0;
-        $magA = 0;
-        $magB = 0;
-
-        foreach ($a as $i => $val) {
-            $dot += $val * ($b[$i] ?? 0);
-            $magA += $val * $val;
-            $magB += ($b[$i] ?? 0) * ($b[$i] ?? 0);
-        }
-
-        return ($magA && $magB)
-            ? $dot / (sqrt($magA) * sqrt($magB))
-            : 0;
+        return [
+            'cv' => [
+                'summary' => (string) ($data['cv']['summary'] ?? ''),
+                'skills'  => [
+                    'all'         => is_array($data['cv']['skills']['all'] ?? null)
+                        ? $data['cv']['skills']['all'] : [],
+                    'recommended' => is_array($data['cv']['skills']['recommended'] ?? null)
+                        ? $data['cv']['skills']['recommended'] : [],
+                ],
+            ],
+            'analysis' => [
+                'ats_score'            => (int) ($data['analysis']['ats_score'] ?? 0),
+                'match_score'          => (int) ($data['analysis']['match_score'] ?? 0),
+                'job_readiness_score'  => (int) ($data['analysis']['job_readiness_score'] ?? 0),
+                'market_fit'           => in_array($data['analysis']['market_fit'] ?? '', ['low', 'medium', 'high'])
+                    ? $data['analysis']['market_fit'] : 'low',
+                'seniority_level'      => in_array($data['analysis']['seniority_level'] ?? '', ['junior', 'mid', 'senior'])
+                    ? $data['analysis']['seniority_level'] : 'junior',
+                'strengths'            => is_array($data['analysis']['strengths'] ?? null)
+                    ? $data['analysis']['strengths'] : [],
+                'weaknesses'           => is_array($data['analysis']['weaknesses'] ?? null)
+                    ? $data['analysis']['weaknesses'] : [],
+                'improvements'         => is_array($data['analysis']['improvements'] ?? null)
+                    ? $data['analysis']['improvements'] : [],
+                // ✅ FIX: missing_market_skills مضمونة دائماً
+                'missing_market_skills' => is_array($data['analysis']['missing_market_skills'] ?? null)
+                    ? $data['analysis']['missing_market_skills'] : [],
+                'job_roles'            => is_array($data['analysis']['job_roles'] ?? null)
+                    ? $data['analysis']['job_roles'] : [],
+                'career_paths'         => is_array($data['analysis']['career_paths'] ?? null)
+                    ? $data['analysis']['career_paths'] : [],
+                'skill_domains'        => is_array($data['analysis']['skill_domains'] ?? null)
+                    ? $data['analysis']['skill_domains'] : [],
+                'skills'               => is_array($data['analysis']['skills'] ?? null)
+                    ? $data['analysis']['skills'] : [],
+                'market_intelligence'  => is_array($data['analysis']['market_intelligence'] ?? null)
+                    ? $data['analysis']['market_intelligence'] : [],
+            ],
+        ];
     }
-    public function optimizeCv(array $cv, array $analysis): array
+
+    /**
+     * ✅ JSON احتياطي
+     */
+    private function fallbackJson(): array
     {
-        $prompt = "Return ONLY valid JSON. Rewrite this CV professionally:\n" .
-            json_encode([
-                'cv' => $cv,
-                'improvements' => $analysis['improvements']
-            ]);
-
-        $response = $this->ai->ask($prompt);
-
-        $json = $this->safeJson($response);
-
-        return $json['cv'] ?? $cv;
-    }
-    public function generatePdf(array $cv, ?int $userId = null, string $template = 'ats')
-    {
-        $template = in_array($template, ['ats','modern','creative']) ? $template : 'ats';
-
-        $html = view("cv.templates.$template", ['cv' => $cv])->render();
-
-        $pdf = Pdf::loadHTML($html)->setPaper('a4');
-
-        $file = "cv/cv_" . time() . ".pdf";
-
-        Storage::disk('public')->put($file, $pdf->output());
-
-        if ($userId && $user = User::find($userId)) {
-            optional($user->profile)->update([
-                'cv_file' => $file
-            ]);
-        }
-
-        return $file;
+        return [
+            'cv' => [
+                'summary' => '',
+                'skills'  => ['all' => [], 'recommended' => []],
+            ],
+            'analysis' => [
+                'ats_score'             => 0,
+                'match_score'           => 0,
+                'job_readiness_score'   => 0,
+                'market_fit'            => 'low',
+                'seniority_level'       => 'junior',
+                'strengths'             => [],
+                'weaknesses'            => [],
+                'improvements'          => [],
+                'missing_market_skills' => [],  // ✅ FIX: موجودة هنا أيضاً
+                'job_roles'             => [],
+                'career_paths'          => [],
+                'skill_domains'         => [],
+                'skills'                => [],
+                'market_intelligence'   => [],
+            ],
+        ];
     }
 }

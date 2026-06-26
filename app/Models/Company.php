@@ -14,6 +14,7 @@ class Company extends Model
         'local_address',
         'phone',
         'logo',
+        'support_offers',
         'status',
         'rejection_reason'
     ];

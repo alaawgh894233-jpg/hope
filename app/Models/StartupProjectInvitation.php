@@ -4,19 +4,17 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class StartupProjectInterest extends Model
+class StartupProjectInvitation extends Model
 {
     protected $fillable = [
         'startup_project_id',
         'company_id',
-        'support_type',
-        'message',
-        'funding_amount',
         'status',
+        'sent_at',
     ];
 
     protected $casts = [
-        'funding_amount' => 'decimal:2',
+        'sent_at' => 'datetime',
     ];
 
     public function project()

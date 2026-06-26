@@ -18,10 +18,10 @@ class Experience extends Model
     ];
 
     protected $casts = [
+        'start_date' => 'datetime', // ✅ مهم
+        'end_date' => 'datetime',   // ✅ مهم
         'is_current' => 'boolean',
         'technologies_used' => 'array',
-        'start_date' => 'date',
-        'end_date' => 'date',
     ];
 
     public function user()

@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\User;
 use App\Services\StartupProjectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,136 +12,119 @@ class StartupProjectController extends Controller
         private readonly StartupProjectService $service
     ) {}
 
-    // 🌐 قائمة المشاريع — عام، summary بس
-    public function index(Request $request): JsonResponse
-    {
-        return response()->json(
-            $this->service->list($request->all())
-        );
-    }
-
-    // 🌐 عرض مشروع — التفاصيل حسب الصلاحية
-    public function show(Request $request, int $id): JsonResponse
-    {
-        /** @var User $user */
-        $user = auth()->user();
-        return response()->json(
-            $this->service->getById($id, $user)
-        );
-    }
-
-    // 📌 نشر مشروع
+    // 1️⃣ POST /startup-projects
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'title'           => 'required|string|max:255',
-            'summary'         => 'required|string|max:500',   // ✅ ملخص عام
-            'description'     => 'required|string',            // ✅ تفاصيل محمية
-            'category'        => 'nullable|string|max:100',
-            'stage'           => 'required|in:idea,in_progress,expanding',
-            'support_types'   => 'required|array|min:1',
-            'support_types.*' => 'in:funding,mentoring,partnership',
-            'funding_goal'    => 'nullable|numeric|min:0',
-            'location'        => 'nullable|string',
-            'website_url'     => 'nullable|url',
+            'title'          => 'required|string|max:255',
+            'description'    => 'required|string',
+            'summary'        => 'required|string|max:500',
+            'category'       => 'nullable|string|max:100',
+            'stage'          => 'nullable|in:idea,in_progress,expanding',
+            'support_types'  => 'required|array|min:1',
+            'support_types.*'=> 'in:funding,mentoring,partnership',
+            'funding_goal'   => 'nullable|numeric|min:0',
+            'location'       => 'nullable|string|max:255',
+            'website_url'    => 'nullable|url',
         ]);
 
-        /** @var User $user */
-        $user = auth()->user();
-
-        return response()->json(
-            $this->service->create($user, $validated),
-            201
-        );
+        $result = $this->service->create(auth()->user(), $validated);
+        return response()->json($result, $result['status']);
     }
 
-    // 📌 تعديل مشروع
-    public function update(Request $request, int $id): JsonResponse
+    // 2️⃣ GET /startup-projects/{id}/suggest-companies
+    public function suggestCompanies(int $id): JsonResponse
+    {
+        $result = $this->service->suggestCompanies($id, auth()->user());
+        return response()->json($result, $result['status']);
+    }
+
+    // 3️⃣ POST /startup-projects/{id}/invite
+    public function invite(Request $request, int $id): JsonResponse
     {
         $validated = $request->validate([
-            'title'           => 'sometimes|string|max:255',
-            'summary'         => 'sometimes|string|max:500',
-            'description'     => 'sometimes|string',
-            'category'        => 'nullable|string|max:100',
-            'stage'           => 'sometimes|in:idea,in_progress,expanding',
-            'support_types'   => 'sometimes|array|min:1',
-            'support_types.*' => 'in:funding,mentoring,partnership',
-            'funding_goal'    => 'nullable|numeric|min:0',
-            'location'        => 'nullable|string',
-            'website_url'     => 'nullable|url',
-            'status'          => 'sometimes|in:active,closed',
+            'company_ids'   => 'required|array|min:1',
+            'company_ids.*' => 'integer|exists:companies,id',
         ]);
 
-        /** @var User $user */
-        $user = auth()->user();
-
-        return response()->json(
-            $this->service->update($user, $id, $validated)
+        $result = $this->service->invite(
+            auth()->user(),
+            $id,
+            $validated['company_ids']
         );
+        return response()->json($result, $result['status']);
     }
 
-    // 📌 حذف مشروع
-    public function destroy(Request $request, int $id): JsonResponse
-    {
-        /** @var User $user */
-        $user = auth()->user();
-
-        return response()->json(
-            $this->service->delete($user, $id)
-        );
-    }
-
-    // 🏢 الشركة تعبر عن اهتمام
+    // 4️⃣ POST /startup-projects/{id}/interest
     public function expressInterest(Request $request, int $id): JsonResponse
     {
         $validated = $request->validate([
             'support_type'   => 'required|in:funding,mentoring,partnership',
             'message'        => 'nullable|string|max:1000',
-            'funding_amount' => 'nullable|numeric|min:0|required_if:support_type,funding',
+            'funding_amount' => 'nullable|numeric|min:0',
         ]);
 
-        /** @var User $user */
-        $user = auth()->user();
-
-        return response()->json(
-            $this->service->expressInterest($user, $id, $validated)
+        $result = $this->service->expressInterest(
+            auth()->user(),
+            $id,
+            $validated
         );
+        return response()->json($result, $result['status']);
     }
 
-    // ✅ صاحب المشروع يرد على اهتمام شركة
+    // 5️⃣ POST /startup-interests/{interestId}/respond
     public function respondToInterest(Request $request, int $interestId): JsonResponse
     {
-        $request->validate([
-            'action' => 'required|in:approve,reject'
+        $validated = $request->validate([
+            'action' => 'required|in:approve,reject',
         ]);
 
-        /** @var User $user */
-        $user = auth()->user();
-
-        return response()->json(
-            $this->service->respondToInterest($user, $interestId, $request->action)
+        $result = $this->service->respondToInterest(
+            auth()->user(),
+            $interestId,
+            $validated['action']
         );
+        return response()->json($result, $result['status']);
     }
 
-    // 💡 اقتراح شركات للمشروع
-    public function suggestCompanies(int $id): JsonResponse
+    // 6️⃣ GET /startup-projects/{id}
+    public function show(int $id): JsonResponse
     {
-        /** @var User $user */
-        $user = auth()->user();
-
-        return response()->json(
-            $this->service->suggestCompanies($id, $user)
-        );
+        $result = $this->service->getById($id, auth()->user());
+        return response()->json($result, $result['status']);
     }
 
-    // 📋 قائمة الاهتمامات على مشروع
+    // 7️⃣ GET /startup-projects/{id}/interests
     public function interests(int $id): JsonResponse
     {
-        /** @var User $user */
-        $user = auth()->user();
+        $result = $this->service->listInterests(auth()->user(), $id);
+        return response()->json($result, $result['status']);
+    }
 
-        return response()->json(
-            $this->service->listInterests($user, $id)
-        );
+    // 8️⃣ POST /startup-projects/{id}/update
+    public function update(Request $request, int $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'title'          => 'sometimes|string|max:255',
+            'description'    => 'sometimes|string',
+            'summary'        => 'sometimes|string|max:500',
+            'category'       => 'nullable|string|max:100',
+            'stage'          => 'nullable|in:idea,in_progress,expanding',
+            'support_types'  => 'sometimes|array|min:1',
+            'support_types.*'=> 'in:funding,mentoring,partnership',
+            'funding_goal'   => 'nullable|numeric|min:0',
+            'location'       => 'nullable|string|max:255',
+            'website_url'    => 'nullable|url',
+        ]);
+
+        $result = $this->service->update(auth()->user(), $id, $validated);
+        return response()->json($result, $result['status']);
+    }
+
+    // 9️⃣ DELETE /startup-projects/{id}
+    public function destroy(int $id): JsonResponse
+    {
+        $result = $this->service->delete(auth()->user(), $id);
+        return response()->json($result, $result['status']);
     }
 }

@@ -16,9 +16,9 @@ class Training extends Model
     ];
 
     protected $casts = [
-        'completed_at' => 'date'
+        'start_date' => 'datetime', // ✅ كان date، غيّره لـ datetime
+        'end_date' => 'datetime',   // ✅ كان date، غيّره لـ datetime
     ];
-
     public function user()
     {
         return $this->belongsTo(User::class);
