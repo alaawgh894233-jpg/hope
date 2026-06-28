@@ -16,7 +16,6 @@ class DatabaseSeeder extends Seeder
             UserSeeder::class,            // 3. المستخدمين
             CompanySeeder::class,         // 4. الشركات (بعد المستخدمين)
             JobPostSeeder::class,         // 5. الوظائف (بعد الشركات والفئات)
-            HiringWorkflowSeeder::class,  // 6. الـ Workflow (بعد الشركات)
             JobApplicationSeeder::class,  // 7. الطلبات (بعد الوظائف والـ Workflow)
             InterviewSeeder::class,       // 8. المقابلات (بعد الطلبات)
             ApplicationTrainingSeeder::class, // 9. التدريب (بعد الطلبات)

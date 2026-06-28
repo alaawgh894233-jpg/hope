@@ -4,6 +4,7 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\ApplicationTrainingController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BlockController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\CertificationController;
 use App\Http\Controllers\CommentController;
@@ -32,6 +33,7 @@ use App\Http\Controllers\PublicProfileController;
 use App\Http\Controllers\ReactionController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReviewController;
+use App\Http\Controllers\SalaryInsightController;
 use App\Http\Controllers\SavedPostController;
 use App\Http\Controllers\SearchController;
 use App\Http\Controllers\SkillController;
@@ -499,7 +501,7 @@ Route::get('/companies/{id}/reviews', [ReviewController::class, 'companyReviews'
 
 
 // routes/api.php
-Route::get('/salary-insights', [SalaryInsightController::class, 'index']); // ?category_id=&location=
+Route::get('/salary-insights', [SalaryInsightController::class, 'index']);
 // routes/api.php
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/reports', [ReportController::class, 'store']);

@@ -24,4 +24,9 @@ class Category extends Model
     {
         return $this->belongsToMany(JobPost::class, 'job_post_category');
     }
+    // app/Models/Category.php
+    public function salaryInsights()
+    {
+        return $this->hasMany(SalaryInsight::class);
+    }
 }

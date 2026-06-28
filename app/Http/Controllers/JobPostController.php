@@ -73,17 +73,12 @@ class JobPostController extends Controller
         );
     }
 
-    // 📌 List with filters + search + pagination
-    public function index(Request $request): JsonResponse  // ✅ return type
+    // app/Http/Controllers/JobPostController.php
+    public function index(Request $request): JsonResponse
     {
+        $jobs = $this->service->list($request->all(), auth()->user());
 
-        $jobs = JobPost::query()
-            ->excludingBlockedBy(auth()->user())
-            ->where('status', 'published')
-            ->paginate(20);
-        return response()->json(
-            $this->service->list($request->all())
-        );
+        return response()->json($jobs);
     }
 
     // 🔐 Ownership check — Admin يقدر يعدل/يحذف أي post

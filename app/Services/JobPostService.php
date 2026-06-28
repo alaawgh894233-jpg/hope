@@ -137,13 +137,11 @@ class JobPostService
             ? $job->created_by === $user->id
             : false;
 
-        // 💬 comments count (from withCount already exists but keep clarity)
         $job->comments_count = $job->comments_count;
 
-        // ❤️ total reactions
         $job->reactions_count = $job->reactions_count;
 
-        // ❤️ reaction icons (types only)
+
         $job->reaction_icons = $job->reactions()
             ->select('type')
             ->distinct()
@@ -188,7 +186,7 @@ class JobPostService
             ->withCount([
                 'comments',
                 'reactions'
-            ]);
+            ])->excludingBlockedBy($user);;
 
         // 🔎 Search
         if (!empty($filters['search'])) {

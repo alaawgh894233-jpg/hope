@@ -58,10 +58,17 @@ class JobPost extends Model
         return $this->belongsToMany(Category::class, 'job_post_category');
     }
 
+    // app/Models/JobPost.php
     public function scopeExcludingBlockedBy($query, ?User $user)
     {
-        if (!$user) return $query;
-        $blockedCompanyIds = $user->blockedCompanyIds();
+        if (!$user) {
+            return $query;
+        }
+
+        $blockedCompanyIds = $user->blocks()
+            ->where('blockable_type', Company::class)
+            ->pluck('blockable_id');
+
         return $query->whereNotIn('company_id', $blockedCompanyIds);
     }
     public function reports() { return $this->morphMany(Report::class, 'reportable'); }
