@@ -8,7 +8,13 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 class Report extends Model
 {
-    protected $fillable = ['reporter_id', 'reason', 'details'];
+    protected $fillable = [  'reporter_id',
+        'reason',
+        'details',
+        'status',
+        'reviewed_by',
+        'admin_note',
+        'reviewed_at',];
 
     public function reporter(): BelongsTo
     {

@@ -516,6 +516,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/blocks', [BlockController::class, 'store']);     // body: { blockable_type: user|company, blockable_id }
     Route::delete('/blocks/{id}', [BlockController::class, 'destroy']);
     Route::get('/blocks', [BlockController::class, 'index']);
+    Route::post('/blocks/check', [BlockController::class, 'check']);
 });
 // routes/api.php
 Route::middleware('auth:sanctum')->group(function () {

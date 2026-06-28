@@ -57,7 +57,7 @@ class ReportController
     public function index(Request $request)
     {
     $reports = Report::with([
-        'reporter:id,first_name,last_name,email',
+        'reporter:id,name,email',
         'reportable'
     ])
         ->when($request->status, function ($query) use ($request) {
