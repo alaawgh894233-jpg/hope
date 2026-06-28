@@ -103,6 +103,16 @@ class User extends Authenticatable
             'saved_posts'
         );
     }
+    public function blocks() { return $this->hasMany(Block::class, 'blocker_id'); }
+
+    public function blockedCompanyIds(): array
+    {
+        return $this->blocks()->where('blockable_type', Company::class)->pluck('blockable_id')->toArray();
+    }
+    public function onboarding()
+    {
+        return $this->hasOne(UserOnboarding::class);
+    }
     public function company()
     {
         return $this->hasOne(Company::class);

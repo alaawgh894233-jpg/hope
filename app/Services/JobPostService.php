@@ -86,17 +86,111 @@ class JobPostService
 
     public function getById($id)
     {
-        $job = JobPost::with(['company', 'categories'])->findOrFail($id);
+        $user = auth()->user();
+
+        $job = JobPost::with([
+            'company:id,company_name,logo,website_url,local_address,category,status',
+            'creator:id,name',
+            'categories:id,name,name_ar,slug'
+        ])
+            ->withCount([
+                'comments',
+                'reactions',
+                'applications'
+            ])
+            ->findOrFail($id);
+
+        // 📈 views
         $job->increment('views');
+        $job->refresh();
 
-        return $job->fresh();
+        // ❤️ reactions (user state)
+        $userReaction = null;
+
+        if ($user) {
+            $userReaction = $job->reactions()
+                ->where('user_id', $user->id)
+                ->first();
+        }
+
+        $job->is_reacted = $userReaction ? true : false;
+        $job->reaction_type = $userReaction?->type;
+
+        // 🔖 saved
+        $job->is_saved = $user
+            ? $job->saves()->where('user_id', $user->id)->exists()
+            : false;
+
+        // 📩 applied
+        $job->has_applied = $user
+            ? $job->applications()->where('user_id', $user->id)->exists()
+            : false;
+
+        // ✅ can apply
+        $job->can_apply =
+            !$job->has_applied &&
+            $job->status === 'published' &&
+            (!$job->expires_at || !$job->expires_at->isPast());
+
+        // 👤 owner
+        $job->is_owner = $user
+            ? $job->created_by === $user->id
+            : false;
+
+        // 💬 comments count (from withCount already exists but keep clarity)
+        $job->comments_count = $job->comments_count;
+
+        // ❤️ total reactions
+        $job->reactions_count = $job->reactions_count;
+
+        // ❤️ reaction icons (types only)
+        $job->reaction_icons = $job->reactions()
+            ->select('type')
+            ->distinct()
+            ->pluck('type')
+            ->values();
+
+        // 📊 reaction breakdown
+        $job->reaction_counts = $job->reactions()
+            ->selectRaw('type, COUNT(*) as total')
+            ->groupBy('type')
+            ->pluck('total', 'type');
+
+        // 🕒 time helpers
+        $job->published_since = $job->created_at->diffForHumans();
+        $job->expires_in = $job->expires_at
+            ? $job->expires_at->diffForHumans()
+            : null;
+
+        // 🏢 company stats
+        $job->company_jobs_count = JobPost::where('company_id', $job->company_id)->count();
+
+        $job->company_active_jobs_count = JobPost::where('company_id', $job->company_id)
+            ->where('status', 'published')
+            ->count();
+
+        // 👥 followers (if exists)
+        $job->company_followers_count = method_exists($job->company, 'followers')
+            ? $job->company->followers()->count()
+            : 0;
+
+        return $job;
     }
-
     public function list(array $filters)
     {
-        $query = JobPost::with('company');
+        $user = auth()->user();
 
-        // 🔎 search
+        $query = JobPost::query()
+            ->with([
+                'company',
+                'categories'
+            ])
+            ->withCount([
+                'comments',
+                'reactions'
+            ]);
+
+        // 🔎 Search
         if (!empty($filters['search'])) {
             $query->where(function ($q) use ($filters) {
                 $q->where('title', 'like', "%{$filters['search']}%")
@@ -104,8 +198,9 @@ class JobPostService
             });
         }
 
-        // 🔧 فلترة بالـ skills (بدون #)
+        // Skills
         if (!empty($filters['skills'])) {
+
             $skills = is_array($filters['skills'])
                 ? $this->formatSkills($filters['skills'])
                 : $this->formatSkills(explode(',', $filters['skills']));
@@ -117,8 +212,9 @@ class JobPostService
             });
         }
 
-        // 🏷️ فلترة بالـ tags (مع #)
+        // Tags
         if (!empty($filters['tags'])) {
+
             $tags = is_array($filters['tags'])
                 ? $this->formatTags($filters['tags'])
                 : $this->formatTags(explode(',', $filters['tags']));
@@ -152,6 +248,43 @@ class JobPostService
 
         $perPage = min((int)($filters['per_page'] ?? 10), 50);
 
-        return $query->latest()->paginate($perPage);
+        $jobs = $query->latest()->paginate($perPage);
+
+        // تحميل مرة واحدة
+        $jobs->load([
+            'reactions:id,job_post_id,user_id,type',
+            'saves:id,job_post_id,user_id',
+            'company.followers:id'
+        ]);
+
+        $jobs->getCollection()->transform(function ($job) use ($user) {
+
+            $userReaction = $job->reactions
+                ->firstWhere('user_id', $user?->id);
+
+            $job->is_reacted = $userReaction !== null;
+
+            $job->reaction_type = $userReaction?->type;
+
+            $job->is_saved = $job->saves
+                ->contains('user_id', $user?->id);
+
+            $job->is_following_company = $job->company
+                ? $job->company->followers->contains('id', $user?->id)
+                : false;
+
+            // أسماء أنواع التفاعلات الموجودة فقط
+            $job->reaction_icons = $job->reactions
+                ->pluck('type')
+                ->unique()
+                ->values();
+
+            unset($job->reactions);
+            unset($job->saves);
+
+            return $job;
+        });
+
+        return $jobs;
     }
 }

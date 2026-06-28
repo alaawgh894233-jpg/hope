@@ -6,24 +6,23 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('notifications', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('type');
-            $table->morphs('notifiable');
-            $table->text('data');
+            $table->id();
+            $table->foreignId('user_id')->constrained()->onDelete('cascade'); // المستقبل
+            $table->string('type'); // review_flagged, review_flag_approved...
+            $table->string('title');
+            $table->text('body');
+            $table->json('data')->nullable(); // review_id, flag_id...
+            $table->boolean('is_read')->default(false);
             $table->timestamp('read_at')->nullable();
             $table->timestamps();
+
+            $table->index(['user_id', 'is_read']);
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('notifications');

@@ -76,6 +76,11 @@ class JobPostController extends Controller
     // 📌 List with filters + search + pagination
     public function index(Request $request): JsonResponse  // ✅ return type
     {
+
+        $jobs = JobPost::query()
+            ->excludingBlockedBy(auth()->user())
+            ->where('status', 'published')
+            ->paginate(20);
         return response()->json(
             $this->service->list($request->all())
         );

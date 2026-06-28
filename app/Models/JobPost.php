@@ -48,10 +48,21 @@ class JobPost extends Model
     {
         return $this->hasMany(JobApplication::class);
     }
-
+    public function saves()
+    {
+        return $this->hasMany(SavedPost::class);
+    }
     // ✅ فئات الوظيفة عبر الجدول الوسيط
     public function categories()
     {
         return $this->belongsToMany(Category::class, 'job_post_category');
     }
+
+    public function scopeExcludingBlockedBy($query, ?User $user)
+    {
+        if (!$user) return $query;
+        $blockedCompanyIds = $user->blockedCompanyIds();
+        return $query->whereNotIn('company_id', $blockedCompanyIds);
+    }
+    public function reports() { return $this->morphMany(Report::class, 'reportable'); }
 }

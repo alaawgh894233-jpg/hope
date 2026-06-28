@@ -13,26 +13,31 @@ class ReactionController extends Controller
 
     public function react(ReactPostRequest $request, $postId)
     {
-        $this->service->react(
+        $result = $this->service->react(
             auth()->id(),
             $postId,
             $request->type
         );
 
         return response()->json([
-            'message' => 'Reaction Added'
+            'message' => 'Reaction Added',
+            'data' => $result['reaction'],
+            'total_reactions' => $result['total_reactions'],
+            'reaction_icons' => $result['reaction_icons'],
         ]);
     }
 
     public function remove($postId)
     {
-        $this->service->remove(
+        $result = $this->service->remove(
             auth()->id(),
             $postId
         );
 
         return response()->json([
-            'message' => 'Reaction Removed'
+            'message' => 'Reaction Removed',
+            'total_reactions' => $result['total_reactions'],
+            'reaction_icons' => $result['reaction_icons'],
         ]);
     }
 

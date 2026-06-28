@@ -4,8 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-return new class extends Migration
-{
+return new class extends Migration {
     /**
      * Run the migrations.
      */
@@ -35,15 +34,18 @@ return new class extends Migration
                 'interview',
                 'training',
                 'accepted',
+                'withdrawn',
                 'rejected'
             ])->default('pending');
+
+            $table->text('withdraw_reason')->nullable();
+            $table->timestamp('withdrawn_at')->nullable();
+            $table->boolean('can_reapply')->default(true);
             $table->timestamps();
         });
     }
-
-
     public function down(): void
     {
-        Schema::dropIfExists('job_applications');
+
     }
 };

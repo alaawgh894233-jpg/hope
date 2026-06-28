@@ -7,6 +7,7 @@ use App\Http\Requests\JobApplication\ApplyRequest;
 use App\Http\Requests\JobApplication\UpdateStatusRequest;
 use App\Services\JobApplicationService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class JobApplicationController extends Controller
 {
@@ -51,5 +52,11 @@ class JobApplicationController extends Controller
         return response()->json(
             $this->service->updateStatus($user, $id, $request->status)
         );
+    }
+    public function myApplications(Request $request): JsonResponse
+    {
+        $result = $this->service->myApplications($request->user());
+
+        return response()->json($result, $result['status']);
     }
 }

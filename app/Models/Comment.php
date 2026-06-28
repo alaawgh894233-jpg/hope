@@ -54,4 +54,6 @@ class Comment extends Model
     {
         return $this->replies()->count();
     }
+    public function reports() { return $this->morphMany(Report::class, 'reportable'); }
+
 }

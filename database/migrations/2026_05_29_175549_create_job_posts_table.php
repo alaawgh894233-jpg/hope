@@ -17,7 +17,8 @@ return new class extends Migration
             $table->foreignId('company_id')
                 ->constrained()
                 ->onDelete('cascade');
-
+            $table->foreignId('category_id')->nullable()
+                ->constrained('categories')->nullOnDelete();
             $table->foreignId('created_by')
                 ->nullable()
                 ->constrained('users')
@@ -30,7 +31,9 @@ return new class extends Migration
             $table->boolean('is_remote')->default(false);
 
             $table->string('salary_range')->nullable();
-
+            $table->unsignedInteger('salary_min')->nullable();
+            $table->unsignedInteger('salary_max')->nullable();
+            $table->string('currency', 3)->default('USD');
             $table->enum('type', [
                 'full_time',
                 'part_time',

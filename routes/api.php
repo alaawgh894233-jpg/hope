@@ -11,18 +11,27 @@ use App\Http\Controllers\CommentReactionController;
 use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\CompanyDashboardController;
 use App\Http\Controllers\ComplaintController;
+use App\Http\Controllers\ConversationController;
 use App\Http\Controllers\CvAnalysisController;
+use App\Http\Controllers\DataExportController;
 use App\Http\Controllers\EducationController;
 use App\Http\Controllers\ExperienceController;
 use App\Http\Controllers\FollowController;
 use App\Http\Controllers\InterestController;
 use App\Http\Controllers\InterviewController;
+use App\Http\Controllers\JobAlertController;
 use App\Http\Controllers\JobApplicationController;
 use App\Http\Controllers\JobPostController;
+use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\PasswordController;
+use App\Http\Controllers\ProfileCompletionController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\PublicProfileController;
 use App\Http\Controllers\ReactionController;
+use App\Http\Controllers\ReportController;
+use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\SavedPostController;
 use App\Http\Controllers\SearchController;
 use App\Http\Controllers\SkillController;
@@ -30,6 +39,7 @@ use App\Http\Controllers\SkillSuggestionAIController;
 use App\Http\Controllers\SkillSuggestionController;
 use App\Http\Controllers\StartupProjectController;
 use App\Http\Controllers\TrainingController;
+use App\Http\Controllers\WithdrawApplicationController;
 use App\Http\Controllers\WorkflowController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -219,18 +229,18 @@ Route::get('/jobs/{id}', [JobPostController::class, 'show']);
         Route::post('/jobs', [JobPostController::class, 'store']);
         Route::post('/jobs/{id}', [JobPostController::class, 'update']);
         Route::delete('/jobs/{id}', [JobPostController::class, 'destroy']);
-
-        Route::get('/jobs/{jobId}/applications', [JobApplicationController::class, 'list']);
+       Route::get('/jobs/{jobId}/applications', [JobApplicationController::class, 'list']);
         Route::post('/applications/{id}/status', [JobApplicationController::class, 'updateStatus']);
     });
 
 
 Route::middleware('auth:sanctum')->group(function () {
-Route::post('/jobs/{jobId}/apply', [JobApplicationController::class, 'apply']); });
+Route::post('/jobs/{jobId}/apply', [JobApplicationController::class, 'apply']);
+Route::get('/my-applications', [JobApplicationController::class, 'myApplications']);
 
+});
 
-
-    Route::middleware('auth:sanctum')->group(function () {
+Route::middleware('auth:sanctum')->group(function () {
         Route::post('/companies/{companyId}/toggle-follow', [FollowController::class, 'toggle']);
         Route::get('/companies/{companyId}/is-following', [FollowController::class, 'isFollowing']);
         Route::get('/companies/{companyId}/followers-count', [FollowController::class, 'followersCount']);
@@ -366,22 +376,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
 Route::middleware('auth:sanctum')->group(function () {
 
-    // 1️⃣ إنشاء الفكرة — يرجع المشروع + الشركات المقترحة
     Route::post('/startup-projects', [StartupProjectController::class, 'store']);
-
-    // 2️⃣ اقتراح شركات — لو المستخدم بدو يعيد
     Route::get('/startup-projects/{id}/suggest-companies', [StartupProjectController::class, 'suggestCompanies']);
-
-    // 3️⃣ المستخدم يدعو الشركات المختارة
     Route::post('/startup-projects/{id}/invite', [StartupProjectController::class, 'invite']);
-
-    // 4️⃣ الشركة تبدي اهتمام
     Route::post('/startup-projects/{id}/interest', [StartupProjectController::class, 'expressInterest']);
-
-    // 5️⃣ المستخدم يرد على الاهتمام
     Route::post('/startup-interests/{interestId}/respond', [StartupProjectController::class, 'respondToInterest']);
-
-    // إدارة
     Route::get('/startup-projects/{id}',         [StartupProjectController::class, 'show']);
     Route::post('/startup-projects/{id}/update', [StartupProjectController::class, 'update']);
     Route::delete('/startup-projects/{id}',      [StartupProjectController::class, 'destroy']);
@@ -392,3 +391,133 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::get('/categories', [CategoryController::class, 'index']);
 
 
+Route::middleware(['auth:sanctum'])->group(function () {
+
+    // ==========================================
+    // 💬 Chat / Conversations
+    // ==========================================
+    Route::prefix('conversations')->group(function () {
+        Route::get('/',                              [ConversationController::class, 'index']);
+        Route::get('/unread-count',                  [ConversationController::class, 'unreadCount']);
+        Route::get('/{conversation}',                [ConversationController::class, 'show']);
+        Route::post('/{conversation}/messages',      [ConversationController::class, 'sendMessage']);
+        Route::post('/{conversation}/read',          [ConversationController::class, 'markRead']);
+        Route::post('/{conversation}/close',         [ConversationController::class, 'close']);
+    });
+
+    // ==========================================
+    // ↩️ Withdraw Application
+    // ==========================================
+    Route::prefix('applications')->group(function () {
+        Route::post('/{application}/withdraw',       [WithdrawApplicationController::class, 'withdraw']);
+        Route::get('/withdrawals',                   [WithdrawApplicationController::class, 'myWithdrawals']);
+        Route::get('/withdraw/reasons',              [WithdrawApplicationController::class, 'reasons']);
+    });
+
+    // إحصائيات الانسحاب (للشركة)
+    Route::get('/company/applications/withdrawal-stats', [WithdrawApplicationController::class, 'stats'])
+        ->middleware('company.approved');
+
+    Route::middleware('auth:sanctum')->prefix('notifications')->group(function () {
+        Route::get('/',              [NotificationController::class, 'index']);
+        Route::get('/unread-count',  [NotificationController::class, 'unreadCount']);
+        Route::post('/{id}/read',    [NotificationController::class, 'markAsRead']);
+        Route::post('/read-all',     [NotificationController::class, 'markAllAsRead']);
+    });
+
+// ==========================================
+// ✅ Reviews — عام (يوزر/شركة)
+// ==========================================
+    Route::middleware('auth:sanctum')->group(function () {
+
+        Route::prefix('reviews')->group(function () {
+            Route::get('/{review}',          [ReviewController::class, 'show']);
+            Route::post('/{review}/respond', [ReviewController::class, 'respond']);
+            Route::post('/{review}/react',   [ReviewController::class, 'react']);
+            Route::post('/{review}/flag',    [ReviewController::class, 'flag']);
+        });
+
+        Route::get('/users/{id}/reviews', [ReviewController::class, 'userReviews']);
+        Route::post('/applications/{application}/review', [ReviewController::class, 'store']);
+        Route::get('/companies/{companyUserId}/reviews',   [ReviewController::class, 'companyReviews']);
+    });
+
+// ==========================================
+// ✅ Reviews — Admin فقط
+// ==========================================
+    Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/reviews')->group(function () {
+
+        Route::post('/{review}/approve', [ReviewController::class, 'approve']);
+        Route::post('/{review}/reject',  [ReviewController::class, 'reject']);
+
+        Route::get('/flagged',               [ReviewController::class, 'flaggedReviews']);
+        Route::get('/{review}/flags',        [ReviewController::class, 'reviewFlags']);
+        Route::post('/flags/{flag}/approve', [ReviewController::class, 'approveFlag']);
+        Route::post('/flags/{flag}/dismiss', [ReviewController::class, 'dismissFlag']);
+    });
+    // ==========================================
+    // 📊 Profile Completion
+    // ==========================================
+    Route::prefix('profile')->group(function () {
+        Route::get('/completion',                    [ProfileCompletionController::class, 'index']);
+        Route::post('/completion/recalculate',       [ProfileCompletionController::class, 'recalculate']);
+
+        // Public Profile Settings
+        Route::get('/public',                        [PublicProfileController::class, 'myProfile']);
+        Route::post('/public',                        [PublicProfileController::class, 'update']);
+        Route::post('/public/change-slug',           [PublicProfileController::class, 'changeSlug']);
+    });
+
+    // ==========================================
+    // 🔔 Job Alerts
+    // ==========================================
+    Route::prefix('job-alerts')->group(function () {
+        Route::get('/',                              [JobAlertController::class, 'index']);
+        Route::post('/',                             [JobAlertController::class, 'store']);
+        Route::post('/{alert}',                       [JobAlertController::class, 'update']);
+        Route::post('/{alert}/toggle',               [JobAlertController::class, 'toggle']);
+        Route::delete('/{alert}',                    [JobAlertController::class, 'destroy']);
+    });
+
+    // ==========================================
+    // 🎯 Onboarding
+    // ==========================================
+    Route::prefix('onboarding')->group(function () {
+        Route::get('/',                              [OnboardingController::class, 'index']);
+        Route::post('/step/{step}/complete',         [OnboardingController::class, 'completeStep']);
+        Route::post('/skip',                         [OnboardingController::class, 'skip']);
+        Route::post('/restart',                      [OnboardingController::class, 'restart']);
+    });
+});
+
+// ==========================================
+// 🌐 Public Profile (بدون auth)
+// ==========================================
+Route::get('/p/{slug}',              [PublicProfileController::class, 'show']);
+Route::get('/companies/{id}/reviews', [ReviewController::class, 'companyReviews']);
+
+
+
+// routes/api.php
+Route::get('/salary-insights', [SalaryInsightController::class, 'index']); // ?category_id=&location=
+// routes/api.php
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/reports', [ReportController::class, 'store']);
+});
+
+Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/reports')->group(function () {
+    Route::get('/', [ReportController::class, 'index']);
+    Route::post('/{report}/resolve', [ReportController::class, 'resolve']); // body: { status, admin_note }
+});
+// routes/api.php
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/blocks', [BlockController::class, 'store']);     // body: { blockable_type: user|company, blockable_id }
+    Route::delete('/blocks/{id}', [BlockController::class, 'destroy']);
+    Route::get('/blocks', [BlockController::class, 'index']);
+});
+// routes/api.php
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/account/export', [DataExportController::class, 'store']);
+    Route::get('/account/export/{req}/download', [DataExportController::class, 'download']);
+    Route::get('/account/export/status', [DataExportController::class, 'status']);
+});

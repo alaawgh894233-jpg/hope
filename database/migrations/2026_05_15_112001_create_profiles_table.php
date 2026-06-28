@@ -27,6 +27,7 @@ return new class extends Migration {
             $table->string('portfolio')->nullable();
             $table->string('cv_file')->nullable();
             $table->string('profile_image')->nullable();
+            $table->boolean('email_digest_enabled')->default(true);
             $table->timestamps();
         });
     }

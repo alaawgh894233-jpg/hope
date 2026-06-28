@@ -30,4 +30,13 @@ class Company extends Model
     {
         return $this->hasMany(CompanyDocument::class);
     }
+    public function followers()
+    {
+        return $this->belongsToMany(
+            User::class,
+            'company_followers',
+            'company_id',
+            'user_id'
+        );
+    }
 }

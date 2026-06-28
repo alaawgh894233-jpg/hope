@@ -9,7 +9,8 @@ use App\Models\JobApplication;
 class InterviewService
 {
     public function __construct(
-        private readonly NotificationService $notificationService
+        private readonly NotificationService $notificationService,
+        private readonly  ConversationService $conversationService
     ) {}
 
     public function schedule(array $data, $user)
@@ -46,6 +47,10 @@ class InterviewService
             'status'             => 'scheduled',  // ✅ أضفناه
         ]);
 
+        $this->conversationService->findOrCreateForApplication(
+            $application,
+            $user->id
+        );
         $this->notificationService->notifyInterviewScheduled(
             $interview->load('jobApplication.jobPost')
         );

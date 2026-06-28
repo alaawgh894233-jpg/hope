@@ -9,7 +9,8 @@ use Illuminate\Http\UploadedFile;
 class JobApplicationService
 {
     public function __construct(
-        private readonly NotificationService $notificationService
+        private readonly NotificationService $notificationService,
+
     ) {}
 
     // 👤 Apply
@@ -108,6 +109,20 @@ class JobApplicationService
             'status'  => 200,
             'message' => 'Status updated',
             'data'    => $application
+        ];
+    }
+    public function myApplications($user)
+    {
+        $applications = JobApplication::with([
+            'jobPost.company'
+        ])
+            ->where('user_id', $user->id)
+            ->latest()
+            ->paginate(10);
+
+        return [
+            'status' => 200,
+            'data'   => $applications,
         ];
     }
 }

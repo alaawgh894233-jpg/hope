@@ -8,7 +8,7 @@ class CommentReactionService
 {
     public function react($userId, $commentId, $type)
     {
-        return CommentReaction::updateOrCreate(
+        $reaction = CommentReaction::updateOrCreate(
             [
                 'user_id' => $userId,
                 'comment_id' => $commentId
@@ -17,14 +17,31 @@ class CommentReactionService
                 'type' => $type
             ]
         );
+
+        return [
+            'reaction' => $reaction,
+            'total_reactions' => CommentReaction::where('comment_id', $commentId)->count(),
+            'reaction_icons' => CommentReaction::where('comment_id', $commentId)
+                ->distinct()
+                ->pluck('type')
+                ->values(),
+        ];
     }
 
     public function remove($userId, $commentId)
     {
-        return CommentReaction::where([
+        CommentReaction::where([
             'user_id' => $userId,
             'comment_id' => $commentId
         ])->delete();
+
+        return [
+            'total_reactions' => CommentReaction::where('comment_id', $commentId)->count(),
+            'reaction_icons' => CommentReaction::where('comment_id', $commentId)
+                ->distinct()
+                ->pluck('type')
+                ->values(),
+        ];
     }
 
     public function count($commentId)

@@ -8,7 +8,7 @@ class ReactionService
 {
     public function react($userId, $postId, $type)
     {
-        return Reaction::updateOrCreate(
+        $reaction = Reaction::updateOrCreate(
             [
                 'user_id' => $userId,
                 'job_post_id' => $postId
@@ -17,16 +17,32 @@ class ReactionService
                 'type' => $type
             ]
         );
+
+        return [
+            'reaction' => $reaction,
+            'total_reactions' => Reaction::where('job_post_id', $postId)->count(),
+            'reaction_icons' => Reaction::where('job_post_id', $postId)
+                ->distinct()
+                ->pluck('type')
+                ->values(),
+        ];
     }
 
     public function remove($userId, $postId)
     {
-        return Reaction::where([
+        Reaction::where([
             'user_id' => $userId,
             'job_post_id' => $postId
         ])->delete();
-    }
 
+        return [
+            'total_reactions' => Reaction::where('job_post_id', $postId)->count(),
+            'reaction_icons' => Reaction::where('job_post_id', $postId)
+                ->distinct()
+                ->pluck('type')
+                ->values(),
+        ];
+    }
     public function getPostReactions($postId)
     {
         return Reaction::with('user:id,name')

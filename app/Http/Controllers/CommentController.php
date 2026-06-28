@@ -21,11 +21,17 @@ class CommentController extends Controller
 
     public function store(StoreCommentRequest $request, $postId)
     {
-        return $this->service->create(
+        $result = $this->service->create(
             auth()->id(),
             $postId,
             $request->validated()
         );
+
+        return response()->json([
+            'message' => 'Comment Added',
+            'data' => $result['comment'],
+            'total_comments' => $result['total_comments'],
+        ]);
     }
 
     public function update(UpdateCommentRequest $request, $id)
@@ -39,9 +45,15 @@ class CommentController extends Controller
 
     public function destroy($id)
     {
-        $this->service->delete($id, auth()->id());
+        $result = $this->service->delete(
+            $id,
+            auth()->id()
+        );
 
-        return response()->json(['message' => 'deleted']);
+        return response()->json([
+            'message' => 'Comment Deleted',
+            'total_comments' => $result['total_comments'],
+        ]);
     }
 
     public function commentsCount($postId)

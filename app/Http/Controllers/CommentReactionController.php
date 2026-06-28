@@ -13,24 +13,31 @@ class CommentReactionController extends Controller
 
     public function react(ReactCommentRequest $request, $commentId)
     {
-        $reaction = $this->service->react(
+        $result = $this->service->react(
             auth()->id(),
             $commentId,
             $request->type
         );
 
         return response()->json([
-            'message' => 'reaction added',
-            'data' => $reaction
+            'message' => 'Reaction Added',
+            'data' => $result['reaction'],
+            'total_reactions' => $result['total_reactions'],
+            'reaction_icons' => $result['reaction_icons'],
         ]);
     }
 
     public function remove($commentId)
     {
-        $this->service->remove(auth()->id(), $commentId);
+        $result = $this->service->remove(
+            auth()->id(),
+            $commentId
+        );
 
         return response()->json([
-            'message' => 'reaction removed'
+            'message' => 'Reaction Removed',
+            'total_reactions' => $result['total_reactions'],
+            'reaction_icons' => $result['reaction_icons'],
         ]);
     }
 

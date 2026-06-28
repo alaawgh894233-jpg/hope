@@ -18,11 +18,14 @@ class CommentService
             'parent_id' => $data['parent_id'] ?? null
         ]);
 
-        $comment->load(['user']);
+        $comment->load('user');
 
         broadcast(new CommentCreated($comment))->toOthers();
 
-        return $comment;
+        return [
+            'comment' => $comment,
+            'total_comments' => Comment::where('job_post_id', $postId)->count(),
+        ];
     }
 
     public function update($commentId, $userId, $content)
@@ -58,10 +61,11 @@ class CommentService
 
         $comment->delete();
 
-        // 🔥 مهم: broadcast delete event
         broadcast(new CommentDeleted($id, $postId))->toOthers();
 
-        return true;
+        return [
+            'total_comments' => Comment::where('job_post_id', $postId)->count(),
+        ];
     }
     public function getCommentsCount($postId)
     {
