@@ -13,7 +13,7 @@ class JobPost extends Model
         'company_id', 'created_by', 'title', 'description',
         'location', 'is_remote', 'salary_range', 'type',
         'status', 'skills', 'tags', 'views',
-        'applications_count', 'is_featured', 'expires_at',
+        'applications_count', 'is_featured', 'expires_at','user_id'
     ];
 
     protected $casts = [

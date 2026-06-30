@@ -76,7 +76,7 @@ class JobPostController extends Controller
     // app/Http/Controllers/JobPostController.php
     public function index(Request $request): JsonResponse
     {
-        $jobs = $this->service->list($request->all(), auth()->user());
+        $jobs = $this->service->list($request->all());
 
         return response()->json($jobs);
     }

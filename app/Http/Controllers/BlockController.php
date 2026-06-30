@@ -16,7 +16,6 @@ class BlockController extends Controller
         'company' => Company::class,
     ];
 
-    // 📌 List كل البلوكات يلي عملها اليوزر
     public function index(Request $request): JsonResponse
     {
         $blocks = $request->user()
@@ -28,7 +27,7 @@ class BlockController extends Controller
         return response()->json($blocks);
     }
 
-    // 📌 بلوك شركة أو مستخدم
+
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -39,25 +38,27 @@ class BlockController extends Controller
         $modelClass = $this->map[$data['blockable_type']];
         $target = $modelClass::findOrFail($data['blockable_id']);
 
-        // ما تسمحيلوش يبلوك نفسه
+
         if ($data['blockable_type'] === 'user' && $target->id === $request->user()->id) {
             throw ValidationException::withMessages([
                 'blockable_id' => 'لا يمكنك حظر حسابك أنت.',
             ]);
         }
 
+
         $block = $request->user()->blocks()->firstOrCreate([
             'blockable_type' => $modelClass,
-            'blockable_id'   => $target->id,
+            'blockable_id' => $target->id,
         ]);
 
         return response()->json([
-            'message' => 'تم الحظر بنجاح.',
-            'data'    => $block,
-        ], 201);
+            'message' => $block->wasRecentlyCreated
+                ? 'تم الحظر بنجاح.'
+                : 'هذا العنصر محظور بالفعل.',
+            'data' => $block,
+        ], $block->wasRecentlyCreated ? 201 : 200);
     }
 
-    // 📌 إلغاء البلوك
     public function destroy(Request $request, int $id): JsonResponse
     {
         $block = $request->user()->blocks()->findOrFail($id);
@@ -66,7 +67,7 @@ class BlockController extends Controller
         return response()->json(['message' => 'تم إلغاء الحظر.']);
     }
 
-    // 📌 تشيك سريع: هل هاد الشخص/الشركة محظور عندي؟
+
     public function check(Request $request): JsonResponse
     {
         $data = $request->validate([

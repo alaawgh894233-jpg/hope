@@ -248,7 +248,7 @@ class JobPostService
 
         $jobs = $query->latest()->paginate($perPage);
 
-        // تحميل مرة واحدة
+
         $jobs->load([
             'reactions:id,job_post_id,user_id,type',
             'saves:id,job_post_id,user_id',

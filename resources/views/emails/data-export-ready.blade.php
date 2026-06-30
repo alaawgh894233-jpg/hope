@@ -1,12 +1,21 @@
 @component('mail::message')
-{{ $user->name }}
 
+    # مرحبًا {{ $user->name }}
 
+    تم تجهيز نسخة من بيانات حسابك بنجاح.
 
-@component('mail::button', ['url' => $downloadUrl])
+    يمكنك تحميل الملف بالضغط على الزر التالي:
 
-@endcomponent
+    @component('mail::button', ['url' => $downloadUrl])
+        تحميل بياناتي
+    @endcomponent
 
-{{ $expiresAt }}
+    **تنتهي صلاحية رابط التحميل في:**
+
+    {{ $expiresAt }}
+
+    إذا لم تطلب هذا التصدير، يمكنك تجاهل هذه الرسالة.
+
+    شكراً لاستخدامك منصة **HOPE**.
 
 @endcomponent

@@ -17,6 +17,7 @@ use App\Http\Controllers\CvAnalysisController;
 use App\Http\Controllers\DataExportController;
 use App\Http\Controllers\EducationController;
 use App\Http\Controllers\ExperienceController;
+use App\Http\Controllers\FirebaseNotificationController;
 use App\Http\Controllers\FollowController;
 use App\Http\Controllers\InterestController;
 use App\Http\Controllers\InterviewController;
@@ -157,8 +158,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/search', [SearchController::class, 'search']);
+        Route::get('/jobs', [JobPostController::class, 'index']);
+        Route::get('/jobs/{id}', [JobPostController::class, 'show']);
     });
-
+Route::middleware('auth:sanctum')->get('/test-auth', function (\Illuminate\Http\Request $request) {
+    return response()->json([
+        'auth_id' => auth()->id(),
+        'user' => $request->user(),
+    ]);
+});
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/company/me', [CompanyController::class, 'myCompany']);
     Route::post('/company/update', [CompanyController::class, 'update']);
@@ -207,6 +215,8 @@ Route::middleware(['auth:sanctum', 'admin'])
         Route::delete('/projects/{id}', [AdminController::class, 'deleteProject']); // body: { reason }
 
 
+
+
         Route::post('/categories', [CategoryController::class, 'store']);
         Route::post('/categories/{id}', [CategoryController::class, 'update']);
         Route::delete('/categories/{id}', [CategoryController::class, 'destroy']);
@@ -223,9 +233,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/me/saved-posts', [SavedPostController::class, 'mySaved']);
         Route::get('/posts/{postId}/is-saved', [SavedPostController::class, 'isSaved']);
     });
-
-Route::get('/jobs', [JobPostController::class, 'index']);
-Route::get('/jobs/{id}', [JobPostController::class, 'show']);
 
     Route::middleware('auth:sanctum', 'company.approved')->group(function () {
         Route::post('/jobs', [JobPostController::class, 'store']);
@@ -395,9 +402,7 @@ Route::get('/categories', [CategoryController::class, 'index']);
 
 Route::middleware(['auth:sanctum'])->group(function () {
 
-    // ==========================================
-    // 💬 Chat / Conversations
-    // ==========================================
+
     Route::prefix('conversations')->group(function () {
         Route::get('/',                              [ConversationController::class, 'index']);
         Route::get('/unread-count',                  [ConversationController::class, 'unreadCount']);
@@ -407,16 +412,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/{conversation}/close',         [ConversationController::class, 'close']);
     });
 
-    // ==========================================
-    // ↩️ Withdraw Application
-    // ==========================================
+
     Route::prefix('applications')->group(function () {
         Route::post('/{application}/withdraw',       [WithdrawApplicationController::class, 'withdraw']);
         Route::get('/withdrawals',                   [WithdrawApplicationController::class, 'myWithdrawals']);
         Route::get('/withdraw/reasons',              [WithdrawApplicationController::class, 'reasons']);
     });
 
-    // إحصائيات الانسحاب (للشركة)
+
     Route::get('/company/applications/withdrawal-stats', [WithdrawApplicationController::class, 'stats'])
         ->middleware('company.approved');
 
@@ -427,9 +430,6 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/read-all',     [NotificationController::class, 'markAllAsRead']);
     });
 
-// ==========================================
-// ✅ Reviews — عام (يوزر/شركة)
-// ==========================================
     Route::middleware('auth:sanctum')->group(function () {
 
         Route::prefix('reviews')->group(function () {
@@ -444,9 +444,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/companies/{companyUserId}/reviews',   [ReviewController::class, 'companyReviews']);
     });
 
-// ==========================================
-// ✅ Reviews — Admin فقط
-// ==========================================
+
     Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/reviews')->group(function () {
 
         Route::post('/{review}/approve', [ReviewController::class, 'approve']);
@@ -457,22 +455,19 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/flags/{flag}/approve', [ReviewController::class, 'approveFlag']);
         Route::post('/flags/{flag}/dismiss', [ReviewController::class, 'dismissFlag']);
     });
-    // ==========================================
-    // 📊 Profile Completion
-    // ==========================================
+
+
     Route::prefix('profile')->group(function () {
         Route::get('/completion',                    [ProfileCompletionController::class, 'index']);
         Route::post('/completion/recalculate',       [ProfileCompletionController::class, 'recalculate']);
 
-        // Public Profile Settings
+
         Route::get('/public',                        [PublicProfileController::class, 'myProfile']);
         Route::post('/public',                        [PublicProfileController::class, 'update']);
         Route::post('/public/change-slug',           [PublicProfileController::class, 'changeSlug']);
     });
 
-    // ==========================================
-    // 🔔 Job Alerts
-    // ==========================================
+
     Route::prefix('job-alerts')->group(function () {
         Route::get('/',                              [JobAlertController::class, 'index']);
         Route::post('/',                             [JobAlertController::class, 'store']);
@@ -481,9 +476,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::delete('/{alert}',                    [JobAlertController::class, 'destroy']);
     });
 
-    // ==========================================
-    // 🎯 Onboarding
-    // ==========================================
+
     Route::prefix('onboarding')->group(function () {
         Route::get('/',                              [OnboardingController::class, 'index']);
         Route::post('/step/{step}/complete',         [OnboardingController::class, 'completeStep']);
@@ -492,17 +485,15 @@ Route::middleware(['auth:sanctum'])->group(function () {
     });
 });
 
-// ==========================================
-// 🌐 Public Profile (بدون auth)
-// ==========================================
+
 Route::get('/p/{slug}',              [PublicProfileController::class, 'show']);
 Route::get('/companies/{id}/reviews', [ReviewController::class, 'companyReviews']);
 
 
 
-// routes/api.php
+
 Route::get('/salary-insights', [SalaryInsightController::class, 'index']);
-// routes/api.php
+
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/reports', [ReportController::class, 'store']);
 });
@@ -511,16 +502,22 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/reports')->group(fun
     Route::get('/', [ReportController::class, 'index']);
     Route::post('/{report}/resolve', [ReportController::class, 'resolve']); // body: { status, admin_note }
 });
-// routes/api.php
+
+
 Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/blocks', [BlockController::class, 'store']);     // body: { blockable_type: user|company, blockable_id }
+    Route::post('/blocks', [BlockController::class, 'store']);
     Route::delete('/blocks/{id}', [BlockController::class, 'destroy']);
     Route::get('/blocks', [BlockController::class, 'index']);
     Route::post('/blocks/check', [BlockController::class, 'check']);
 });
-// routes/api.php
+
+
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/account/export', [DataExportController::class, 'store']);
     Route::get('/account/export/{req}/download', [DataExportController::class, 'download']);
     Route::get('/account/export/status', [DataExportController::class, 'status']);
 });
+
+
+Route::post('/save-fcm-token', [FirebaseNotificationController::class, 'saveToken'])->middleware('auth:sanctum');
+Route::post('/send-notification', [FirebaseNotificationController::class, 'send'])->middleware('auth:sanctum');
